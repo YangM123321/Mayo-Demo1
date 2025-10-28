@@ -5,6 +5,9 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 import json, joblib, pandas as pd
+import os
+SKIP_MODEL_LOAD = os.getenv("SKIP_MODEL_LOAD") == "1"
+
 
 
 
@@ -35,6 +38,14 @@ class AdmitResp(BaseModel):
     encounter_id: str
     probability: float
     label: int
+
+@app.on_event("startup")
+async def _startup():
+    if SKIP_MODEL_LOAD:
+        # make attributes your routes expect
+        app.state.model_bundle = getattr(app.state, "model_bundle", None)
+        return
+
 
 @app.get("/")
 def root():

@@ -31,6 +31,10 @@ jobs:
       - name: Run pytest
         run: pytest -q
 
+        env:
+          SKIP_MODEL_LOAD: "1"
+
+
   deploy:
     name: Build & Deploy to Cloud Run
     runs-on: ubuntu-latest
