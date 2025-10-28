@@ -1,4 +1,4 @@
-# src/service.py
+﻿# src/service.py
 from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -111,3 +111,9 @@ gcloud run deploy mayo-api `
   --command uvicorn `
   --args "src.service:app,--host,0.0.0.0,--port,8080"
 
+
+# --- CI safeguard: ensure attribute exists so tests don't crash when startup is minimal
+try:
+    app.state.model_bundle
+except AttributeError:
+    app.state.model_bundle = None
