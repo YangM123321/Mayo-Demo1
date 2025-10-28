@@ -1,0 +1,18 @@
+﻿pyarrow
+python-dateutil
+py2neo
+matplotlib
+pydantic        # models (AdmissionRequest, FHIRResource, etc.)
+requests        # FHIR GET/POST
+python-dotenv   # load .env
+
+jupyterlab==4.*
+ipykernel
+fastapi==0.115.5
+uvicorn[standard]==0.32.0
+pandas==2.2.3
+numpy==1.26.4
+joblib==1.4.2
+scikit-learn==1.5.2
+mlflow==2.14.1
+

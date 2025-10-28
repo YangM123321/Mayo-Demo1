@@ -1,0 +1,172 @@
+import argparse
+import json
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions, SetupOptions
+from apache_beam.transforms.window import FixedWindows
+from apache_beam.transforms.userstate import ReadModifyWriteStateSpec
+from apache_beam import DoFn, ParDo, CombineFn, WindowInto
+from apache_beam.io.gcp.bigquery import WriteToBigQuery
+from apache_beam.io.gcp.pubsub import ReadFromPubSub
+import datetime as dt
+
+# -------- Helpers --------
+
+def _to_float(x):
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+def _parse_msg(raw: bytes):
+    """Parse Pub/Sub message. Expected JSON with:
+       patient_id (int),
+       optional vitals: BP_SYS, BP_DIA,
+       ts (RFC3339). Example:
+       {"patient_id":1010,"BP_SYS":134,"BP_DIA":61,"ts":"2025-10-25T17:56:30Z"}
+    """
+    obj = json.loads(raw.decode("utf-8"))
+    pid = int(obj["patient_id"])
+    bp_sys = _to_float(obj.get("BP_SYS"))
+    bp_dia = _to_float(obj.get("BP_DIA"))
+
+    # event time, fallback to processing time
+    ts = obj.get("ts")
+    if ts:
+        try:
+            event_time = dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            event_time = None
+    else:
+        event_time = None
+
+    return pid, bp_sys, bp_dia, event_time
+
+class WithEventTime(DoFn):
+    def process(self, raw: bytes, timestamp=DoFn.TimestampParam):
+        pid, bp_sys, bp_dia, event_ts = _parse_msg(raw)
+        # If message had a ts, use it; else keep Pub/Sub publish time
+        if event_ts is not None:
+            yield beam.window.TimestampedValue((pid, bp_sys, bp_dia), event_ts)
+        else:
+            yield (pid, bp_sys, bp_dia)
+
+class AggAcc:
+    __slots__ = ("n_sys", "sum_sys", "last_sys",
+                 "n_dia", "sum_dia")
+    def __init__(self):
+        self.n_sys = 0
+        self.sum_sys = 0.0
+        self.last_sys = None
+        self.n_dia = 0
+        self.sum_dia = 0.0
+
+class VitalAgg(CombineFn):
+    def create_accumulator(self):
+        return AggAcc()
+
+    def add_input(self, acc: AggAcc, val):
+        _, bp_sys, bp_dia = val
+        if bp_sys is not None:
+            acc.n_sys += 1
+            acc.sum_sys += bp_sys
+            acc.last_sys = bp_sys
+        if bp_dia is not None:
+            acc.n_dia += 1
+            acc.sum_dia += bp_dia
+        return acc
+
+    def merge_accumulators(self, accs):
+        out = AggAcc()
+        for a in accs:
+            out.n_sys += a.n_sys
+            out.sum_sys += a.sum_sys
+            # Use the last non-None last_sys encountered (windows are time-bounded anyway)
+            out.last_sys = a.last_sys if a.last_sys is not None else out.last_sys
+            out.n_dia += a.n_dia
+            out.sum_dia += a.sum_dia
+        return out
+
+    def extract_output(self, acc: AggAcc):
+        mean_sys = (acc.sum_sys / acc.n_sys) if acc.n_sys > 0 else None
+        mean_dia = (acc.sum_dia / acc.n_dia) if acc.n_dia > 0 else None
+        return {
+            "BP_SYS_mean": mean_sys,
+            "BP_SYS_last": acc.last_sys,
+            "BP_DIA_mean": mean_dia,
+        }
+
+class FormatForBQ(DoFn):
+    def process(self, element, window=DoFn.WindowParam):
+        # element: (patient_id, agg_dict)
+        patient_id, agg = element
+        # BigQuery row per 10-s window end
+        window_end = window.end.to_utc_datetime().replace(tzinfo=None)
+        yield {
+            "patient_id": patient_id,
+            "BP_SYS_mean": agg.get("BP_SYS_mean"),
+            "BP_SYS_last": agg.get("BP_SYS_last"),
+            "BP_DIA_mean": agg.get("BP_DIA_mean"),
+            "window_end_ts": window_end.isoformat(sep=" ")  # BQ TIMESTAMP accepts this
+        }
+
+def run():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--region", default="us-central1")
+    parser.add_argument("--input_topic", required=True, help="projects/PROJECT/topics/vitals")
+    parser.add_argument("--bq_dataset", default="mayo")
+    parser.add_argument("--bq_table", default="features_latest")
+    parser.add_argument("--temp_location", required=True, help="gs://.../tmp")
+    parser.add_argument("--staging_location", required=True, help="gs://.../staging")
+    parser.add_argument("--service_account_email", help="Dataflow worker SA")
+    parser.add_argument("--window_sec", type=int, default=10)
+
+    args, beam_args = parser.parse_known_args()
+
+    table_spec = f"{args.project}:{args.bq_dataset}.{args.bq_table}"
+    schema = {
+        "fields": [
+            {"name": "patient_id", "type": "INTEGER", "mode": "NULLABLE"},
+            {"name": "BP_SYS_mean", "type": "FLOAT",   "mode": "NULLABLE"},
+            {"name": "BP_SYS_last", "type": "FLOAT",   "mode": "NULLABLE"},
+            {"name": "BP_DIA_mean", "type": "FLOAT",   "mode": "NULLABLE"},
+            {"name": "window_end_ts","type":"TIMESTAMP","mode":"NULLABLE"},
+        ]
+    }
+
+    options_dict = {
+        "project": args.project,
+        "region": args.region,
+        "job_name": "pubsub-to-bq-agg-{}".format(dt.datetime.utcnow().strftime("%Y%m%d%H%M%S")),
+        "staging_location": args.staging_location,
+        "temp_location": args.temp_location,
+        "streaming": True,
+        "save_main_session": True,
+        "experiments": ["use_beam_bq_sink"]  # stable BQ sink in streaming
+    }
+    if args.service_account_email:
+        options_dict["service_account_email"] = args.service_account_email
+
+    pipeline_options = PipelineOptions(flags=beam_args, **options_dict)
+    pipeline_options.view_as(StandardOptions).runner = "DataflowRunner"
+    pipeline_options.view_as(SetupOptions).save_main_session = True
+
+    with beam.Pipeline(options=pipeline_options) as p:
+        (
+            p
+            | "ReadPubSub" >> ReadFromPubSub(topic=args.input_topic)
+            | "SetEventTime" >> ParDo(WithEventTime())
+            | "KeyByPatient" >> beam.Map(lambda t: (t[0], t))  # key = patient_id
+            | "Window10s" >> WindowInto(FixedWindows(args.window_sec))
+            | "CombineVitals" >> beam.CombinePerKey(VitalAgg())
+            | "FormatForBQ" >> ParDo(FormatForBQ())
+            | "WriteBQ" >> WriteToBigQuery(
+                table=table_spec,
+                schema=schema,
+                write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,
+                create_disposition=beam.io.BigQueryDisposition.CREATE_NEVER,
+            )
+        )
+
+if __name__ == "__main__":
+    run()

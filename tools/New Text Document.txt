@@ -1,0 +1,126 @@
+# tools/dataflow_vitals_to_bq.py
+import argparse, json, typing as T
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
+from apache_beam.transforms.window import FixedWindows
+from datetime import datetime, timezone
+
+# Pub/Sub messages are JSON like:
+# {"event_id": "...", "patient_id": 1012, "ts": "2025-10-25T17:00:20.759988Z", "BP_SYS": 109, "BP_DIA": 74}
+
+def parse_pubsub_json(msg: bytes) -> dict:
+    d = json.loads(msg.decode("utf-8"))
+    # normalize types
+    d["patient_id"] = int(d["patient_id"])
+    d["BP_SYS"] = float(d["BP_SYS"])
+    d["BP_DIA"] = float(d["BP_DIA"])
+    return d
+
+class Latest(beam.CombineFn):
+    # keep the latest element by ts string (ISO-8601)
+    def create_accumulator(self):
+        return None
+    def add_input(self, acc, elem):
+        if acc is None:
+            return elem
+        return elem if elem["ts"] > acc["ts"] else acc
+    def merge_accumulators(self, accs):
+        latest = None
+        for a in accs:
+            if a is None: 
+                continue
+            if latest is None or a["ts"] > latest["ts"]:
+                latest = a
+        return latest
+    def extract_output(self, acc):
+        return acc
+
+def to_bq_row(key_vals, window_end: datetime):
+    patient_id, vals = key_vals
+    mean_sys = sum(v["BP_SYS"] for v in vals) / max(1, len(vals))
+    mean_dia = sum(v["BP_DIA"] for v in vals) / max(1, len(vals))
+    return {
+        "patient_id": patient_id,
+        "BP_SYS_mean": float(mean_sys),
+        "BP_DIA_mean": float(mean_dia),
+        "BP_SYS_last": float(sorted(vals, key=lambda x: x["ts"])[-1]["BP_SYS"]) if vals else None,
+        "window_end": window_end.replace(tzinfo=timezone.utc).isoformat()
+    }
+
+def run(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--region", required=True)
+    parser.add_argument("--input_topic", required=True, help="projects/<proj>/topics/<topic>")
+    parser.add_argument("--output_table", required=True, help="<project>:<dataset>.<table>")
+    parser.add_argument("--temp_location", required=True)
+    parser.add_argument("--staging_location", required=True)
+    parser.add_argument("--window_sec", type=int, default=10)
+    args, beam_args = parser.parse_known_args(argv)
+
+    options_dict = {
+        "project": args.project,
+        "region": args.region,
+        "temp_location": args.temp_location,
+        "staging_location": args.staging_location,
+        "streaming": True,
+        "save_main_session": True,
+        "job_name": "vitals-to-bq",
+    }
+    pipeline_options = PipelineOptions(flags=beam_args, **options_dict)
+    pipeline_options.view_as(StandardOptions).streaming = True
+
+    schema = ",".join([
+        "patient_id:INTEGER",
+        "BP_SYS_mean:FLOAT",
+        "BP_SYS_last:FLOAT",
+        "BP_DIA_mean:FLOAT",
+        "window_end:TIMESTAMP",
+    ])
+
+    with beam.Pipeline(options=pipeline_options) as p:
+        messages = (
+            p
+            | "ReadPubSub" >> beam.io.ReadFromPubSub(topic=args.input_topic).with_output_types(bytes)
+            | "ParseJSON"  >> beam.Map(parse_pubsub_json)
+        )
+
+        # windowed per-patient grouping
+        windowed = messages | "Window" >> beam.WindowInto(FixedWindows(args.window_sec))
+
+        # group for means
+        grouped = (
+            windowed
+            | "KeyByPatient" >> beam.Map(lambda d: (d["patient_id"], d))
+            | "GroupByPatient" >> beam.GroupByKey()
+        )
+
+        # latest per patient (for BP_SYS_last)
+        latest = (
+            windowed
+            | "KeyByPatientForLatest" >> beam.Map(lambda d: (d["patient_id"], d))
+            | "CombineLatest" >> beam.CombinePerKey(Latest())
+        )
+
+        # join grouped and latest on patient_id within window
+        # simpler: compute last from grouped values (already sorted by ts when we build the row)
+        rows = (
+            grouped
+            | "BuildBQRow" >> beam.MapTuple(
+                lambda pid, vals, wnd=beam.DoFn.WindowParam(): to_bq_row((pid, list(vals)), wnd.end.to_utc_datetime())
+            )
+        )
+
+        _ = (
+            rows
+            | "WriteToBQ" >> beam.io.WriteToBigQuery(
+                table=args.output_table,
+                schema=schema,
+                create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+                write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,
+                custom_gcs_temp_location=args.temp_location,
+            )
+        )
+
+if __name__ == "__main__":
+    run()

@@ -1,0 +1,541 @@
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+pwd
+.\scripts\setup.ps1
+. .\.venv\Scripts\Activate.ps1
+python .\src\clean_ehr.py
+.\scripts\start-neo4j-docker.ps1
+.\.venv\Scripts\python.exe .\src\kg_load.py
+.\.venv\Scripts\python.exe .\src\etl_pipeline.py
+.\.venv\Scripts\python.exe .\src\ml_nlp_baseline.py
+.\.venv\Scripts\python.exe .\src\report_plots.py
+
+# Load API:
+.\.venv\Scripts\uvicorn.exe src.app:main --reload --port 8000
+Main docs → http://127.0.0.1:8000/docs
+MLflow docs → http://127.0.0.1:8000/mlflow/docs
+
+
+.\.venv\Scripts\python.exe .\src\fhir_export.py
+
+.\.venv\Scripts\python.exe .\src\viz_lab_counts.py
+
+-----------------------------------------------------
+
+# Run notebook 
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\scripts\setup.ps1
+. .\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe etl\flatten_mimic_vitals.py
+.venv\Scripts\Activate
+jupyter notebook
+# Then Run
+EDA.ipynb
+
+# Run 
+
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\.venv\Scripts\Activate
+python .\features\build_features.py
+
+# Run notebook again:
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\.venv\Scripts\Activate
+jupyter notebook
+SanityCheck.ipynb
+Modeling.ipynb
+
+
+-------------------------------------
+On Demo1 Phase 1-3:
+
+Jupyter Notebook
+Test swagger post predict admission
+Docker
+--------------------------------------------
+
+Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+
+# Build & run Docker:
+
+docker build -t mayo-demo1 .
+docker rm -f mayo1
+docker run -d --name mayo1 -p 8000:8000 mayo-demo1
+docker logs mayo1
+
+
+1. Run API (default)
+docker run -d --name mayo1 -p 8000:8000 -v "${PWD}\models:/app/models" -v "${PWD}\data:/app/data" mayo-demo1
+docker ps
+
+Open:
+Main docs → http://127.0.0.1:8000/docs
+MLflow docs → http://127.0.0.1:8000/mlflow/docs
+
+2. Run Jupyter (inside the same image)
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+docker build -t mayo-demo1 .
+
+docker rm -f mayo1-nb 2>$null
+docker run -d --name mayo1-nb -p 8888:8888 -e MODE=jupyter -v "${PWD}:/app" mayo-demo1
+
+docker rm -f mayo1-nb
+docker run -d --name mayo1-nb -p 8888:8888 -e MODE=jupyter -v "${PWD}:/app" mayo-demo1
+
+docker logs -f mayo1-nb
+Then open: 👉 http://localhost:8888/lab
+-------------------------------------------------
+
+---------------------------------------------
+
+
+3.Run a one-off script (ETL, KG load, training, etc.)
+# Run ETL Pipeline -(writes the processed output (out/labs_curated.parquet) to disk)
+
+docker run --rm -e MODE=script -e SCRIPT="src/etl_pipeline.py" -e NEO4J_URI="bolt://host.docker.internal:7687" -e NEO4J_USER="neo4j" -e NEO4J_PASS="testpass" -v "${PWD}\models:/app/models" -v "${PWD}\data:/app/data" -v "${PWD}\out:/app/out" mayo-demo1
+or:
+docker network create mayo-net 2>$null
+docker network connect mayo-net mayo-neo4j
+docker run --rm --network mayo-net `
+  -e MODE=script `
+  -e SCRIPT="src/etl_pipeline.py" `
+  -e NEO4J_URI="bolt://mayo-neo4j:7687" `
+  -e NEO4J_USER="neo4j" `
+  -e NEO4J_PASS="testpass" `
+  -v "${PWD}\models:/app/models" `
+  -v "${PWD}\data:/app/data" `
+  -v "${PWD}\out:/app/out" `
+  mayo-demo1
+
+#Run clean EHR script
+docker run --rm -e MODE=script -e SCRIPT="src/clean_ehr.py" mayo-demo1
+
+#Run knowledge graph loader
+
+docker build -t mayo-demo1 .
+
+docker run --rm -e MODE=script -e SCRIPT=src/kg_load.py `
+  -e NEO4J_URI=bolt://host.docker.internal:7687 `
+  -e NEO4J_USER=neo4j -e NEO4J_PASS=testpass mayo-demo1
+
+
+# Run feature builder
+docker run --rm -e MODE=script -e SCRIPT="features/build_features.py" mayo-demo1
+
+
+5. A) Setup & data prep
+
+# Pre-Docker:
+
+python .\src\clean_ehr.py
+
+# Docker:
+
+docker run --rm `
+  -e MODE=script `
+  -e SCRIPT=src/clean_ehr.py `
+  -v "${PWD}\data:/app/data" `
+  -v "${PWD}\out:/app/out" `
+  mayo-demo1
+
+B) Start Neo4j (if you use Docker Neo4j)
+
+Pre-Docker
+
+.\scripts\start-neo4j-docker.ps1
+
+Docker (explicit):
+
+docker rm -f mayo-neo4j 2>$null
+docker network create mayo-net 2>$null
+docker run -d --name mayo-neo4j --network mayo-net `
+  -p 7474:7474 -p 7687:7687 `
+  -e NEO4J_AUTH=neo4j/testpass neo4j:5
+
+C) Load Knowledge Graph
+
+Pre-Docker
+
+.\.venv\Scripts\python.exe .\src\kg_load.py
+
+Docker (Neo4j on host)
+
+docker run --rm `
+  -e MODE=script `
+  -e SCRIPT=src/kg_load.py `
+  -e NEO4J_URI=bolt://host.docker.internal:7687 `
+  -e NEO4J_USER=neo4j `
+  -e NEO4J_PASS=testpass `
+  mayo-demo1
+
+
+Docker (Neo4j in Docker)
+
+docker run --rm --network mayo-net `
+  -e MODE=script `
+  -e SCRIPT=src/kg_load.py `
+  -e NEO4J_URI=bolt://mayo-neo4j:7687 `
+  -e NEO4J_USER=neo4j `
+  -e NEO4J_PASS=testpass `
+  mayo-demo1
+
+D) ETL Pipeline
+
+Pre-Docker
+
+.\.venv\Scripts\python.exe .\src\etl_pipeline.py
+
+Docker
+
+docker run --rm `
+  -e MODE=script `
+  -e SCRIPT=src/etl_pipeline.py `
+  -e NEO4J_URI=bolt://host.docker.internal:7687 `
+  -e NEO4J_USER=neo4j `
+  -e NEO4J_PASS=testpass `
+  -v "${PWD}\models:/app/models" `
+  -v "${PWD}\data:/app/data" `
+  -v "${PWD}\out:/app/out" `
+  mayo-demo1
+
+
+(If using Neo4j in Docker, swap NEO4J_URI to bolt://mayo-neo4j:7687 and add --network mayo-net.)
+
+E) ML / NLP baseline
+
+Pre-Docker
+
+.\.venv\Scripts\python.exe .\src\ml_nlp_baseline.py
+
+Docker
+
+docker run --rm `
+  -e MODE=script `
+  -e SCRIPT=src/ml_nlp_baseline.py `
+  -v "${PWD}\data:/app/data" `
+  -v "${PWD}\models:/app/models" `
+  -v "${PWD}\out:/app/out" `
+  mayo-demo1
+
+F) Report plots
+
+Pre-Docker
+
+.\.venv\Scripts\python.exe .\src\report_plots.py
+
+Docker
+
+docker run --rm `
+  -e MODE=script `
+  -e SCRIPT=src/report_plots.py `
+  -v "${PWD}\out:/app/out" `
+  mayo-demo1
+
+G) FHIR export
+
+Pre-Docker
+
+.\.venv\Scripts\python.exe .\src\fhir_export.py
+
+Docker
+
+docker run --rm `
+  -e MODE=script `
+  -e SCRIPT=src/fhir_export.py `
+  -v "${PWD}\out:/app/out" `
+  mayo-demo1
+
+H) Lab counts visualization
+
+Pre-Docker
+
+.\.venv\Scripts\python.exe .\src\viz_lab_counts.py
+
+Docker
+
+docker run --rm `
+  -e MODE=script `
+  -e SCRIPT=src/viz_lab_counts.py `
+  -v "${PWD}\out:/app/out" `
+  mayo-demo1
+
+I) Flatten vitals helper (the ETL helper you ran before notebooks)
+
+Pre-Docker
+
+.\.venv\Scripts\python.exe etl\flatten_mimic_vitals.py
+
+Docker
+
+docker run --rm `
+  -e MODE=script `
+  -e SCRIPT=etl/flatten_mimic_vitals.py `
+  -v "${PWD}\data:/app/data" `
+  -v "${PWD}\out:/app/out" `
+  mayo-demo1
+
+J) Feature builder
+
+Pre-Docker
+
+python .\features\build_features.py
+
+Docker
+
+docker run --rm `
+  -e MODE=script `
+  -e SCRIPT=features/build_features.py `
+  -v "${PWD}\data:/app/data" `
+  -v "${PWD}\out:/app/out" `
+  -v "${PWD}\models:/app/models" `
+  mayo-demo1
+
+K) Jupyter notebooks (EDA, SanityCheck, Modeling)
+
+Pre-Docker
+
+Activate venv → jupyter notebook → open and run EDA.ipynb, SanityCheck.ipynb, Modeling.ipynb
+
+Docker
+
+docker rm -f mayo1-nb 2>$null
+docker run -d --name mayo1-nb -p 8888:8888 `
+  -e MODE=jupyter `
+  -v "${PWD}:/app" `
+  mayo-demo1
+docker logs -f mayo1-nb   # copy token URL
+# Open http://localhost:8888/lab and run the notebooks
+
+
+Mounting ${PWD}:/app lets the notebooks read/write your project files directly.
+
+L) API server
+
+Pre-Docker
+
+uvicorn src.app:main --reload --port 8000
+
+Docker
+
+docker rm -f mayo1 2>$null
+docker run -d --name mayo1 -p 8000:8000 `
+  -v "${PWD}\models:/app/models" `
+  -v "${PWD}\data:/app/data" `
+  mayo-demo1
+# Open:
+# http://127.0.0.1:8000/docs
+# http://127.0.0.1:8000/mlflow/docs
+
+M) Debug shell (equivalent to working in venv terminal)
+docker run -it --rm `
+  -e MODE=shell `
+  -v "${PWD}:/app" `
+  mayo-demo1
+
+4. Open a shell in the container (for quick debugging)
+docker run -it --rm -e MODE=shell -v "${PWD}:/app" mayo-demo1
+
+
+======================================================
+
+phase 4 
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+pwd
+.\scripts\setup.ps1
+. .\.venv\Scripts\Activate.ps1
+
+Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+docker compose down -v
+
+docker compose up -d postgres
+docker compose up --no-deps airflow-init
+docker compose up -d airflow-webserver airflow-scheduler
+
+docker compose logs -f airflow-webserver
+
+--------------------------------------------------
+docker compose up -d redpanda redpanda-console
+# or if already running:
+docker compose up -d --force-recreate --no-deps redpanda
+docker compose up -d --force-recreate --no-deps redpanda-console
+👉 http://localhost:8081   (for redpanda)
+
+-------------------------------------------------
+Fresh start:
+
+cd C:\Users\yangm\Desktop\Mayo-Demo1
+docker compose down -v
+
+# Start DB + init Airflow
+docker compose up -d postgres
+docker compose up --no-deps airflow-init
+docker compose up -d airflow-webserver airflow-scheduler
+
+# Start Redpanda broker, then Console
+docker compose up -d redpanda
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+# wait until redpanda shows (healthy)
+docker compose up -d redpanda-console
+
+
+Open:
+
+Airflow: http://localhost:8080
+
+Redpanda Console: http://localhost:8081
+
+# Sanity check:
+
+curl http://localhost:9644/v1/status/ready    # -> {"status":"ready"}
+docker exec -it redpanda rpk cluster info --brokers redpanda:9092
+
+------------------------------------------------------------
+python scripts/train_baseline.py
+
+uvicorn src.app:main --reload --port 8000
+
+# API:
+
+http://127.0.0.1:8000/docs
+
+
+--------------------------------------------------------------
+
+
+
+docker compose exec airflow-webserver airflow users create `
+  --username admin `
+  --firstname Min `
+  --lastname Yang `
+  --role Admin `
+  --email yangminjiang38@gmail.com `
+  --password admin
+
+👉 http://localhost:8080
+👉 http://localhost:8081   (for redpanda)
+
+1. Airflow
+
+
+docker compose up -d redpanda redpanda-console
+
+=============================
+
+Phase 4 A 5
+
+============
+Phase 5 -
+✅ Core Stages in the Document
+
+1.Model Training + Evaluation
+
+2.SHAP Explainability
+
+3.MLflow Tracking + Model Registry
+
+4.Model Serving via FastAPI (API prediction)
+
+5.Direct MLflow Model Serving (no app code)
+
+6.CI/CD (GitHub Actions)
+
+7.Kafka Streaming Demo
+
+
+Stage 1:Model Training + Evaluation
+# from your project root
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\.venv\Scripts\activate
+
+# make sure ETL has produced out\labs_curated.parquet
+# python .\src\clean_ehr.py
+# python .\src\etl_pipeline.py
+
+# install deps (adjust versions to your env if needed)
+pip install pandas pyarrow scikit-learn joblib matplotlib
+
+# train and save models + text report
+python .\src\train_admission.py
+
+# generate ROC/PR plots
+python .\src\evaluate_admission.py
+
+# open plots
+start .\out\ml_plots
+
+Stage 2: SHAP Explainability
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\.venv\Scripts\activate
+pip install shap matplotlib pandas numpy joblib
+
+# make sure out\labs_curated.parquet exists from your ETL
+python .\src\shap_explain.py
+
+start .\out\shap\shap_global_bar.png
+start .\out\shap\shap_waterfall_first.png
+# optional
+start .\out\shap\shap_force_first.html
+
+Stage 3: MLflow Tracking + Model Registry
+# from project root
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\.venv\Scripts\activate
+pip install mlflow scikit-learn pandas numpy joblib
+
+# 1) Train and log to MLflow (creates mlflow.db)
+python .\src\train_admission_mlflow.py
+
+# 2) Open MLflow UI
+mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001
+start http://localhost:5001
+
+# 3) Register the latest run as a version and set alias 'champion'
+Second powershell:
+
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\.venv\Scripts\activate
+python .\src\mlflow_register_latest.py
+
+Stage 4: Model Serving via FastAPI (API prediction)
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\.venv\Scripts\activate
+
+# ensure Stage 3 created mlflow.db and models/admit_mlflow_lr.joblib
+uvicorn src.app_mlflow:app --port 8000 --reload
+
+# Test in browser:
+# http://127.0.0.1:8000/docs  → POST /predict/admission
+# sample body:
+# { "loinc_2345_7": 185.0, "loinc_718_7": 10.8 }
+
+
+Optional Dockerfile (ready for Cloud Run):
+Second Powershell:
+
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\.venv\Scripts\activate
+
+Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+
+docker build -t mayo-api -f Dockerfile.api .
+docker run -p 8080:8080 mayo-api
+# open http://localhost:8080/docs
+
+---------------------------------
+
+5.Direct MLflow Model Serving (no app code)
+
+cd "C:\Users\yangm\Desktop\Mayo-Demo1"
+.\.venv\Scripts\activate
+
+$env:MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"
+$env:MLFLOW_REGISTRY_URI = "sqlite:///mlflow.db"
+
+# Two patients in one call:
+$df = @{
+  dataframe_records = @(
+    @{ "2345-7" = 185.0; "718-7" = 10.8 },
+    @{ "2345-7" = 120.0; "718-7" = 13.2 }
+  )
+} | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:5002/invocations" -Headers @{ "Content-Type"="application/json" } -Body $df

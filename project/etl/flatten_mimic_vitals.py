@@ -1,0 +1,1 @@
+print('flatten_mimic_vitals OK')

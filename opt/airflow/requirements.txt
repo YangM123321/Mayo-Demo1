@@ -1,0 +1,5 @@
+joblib
+pandas>=2.1
+pyarrow          # for reading/writing parquet
+scikit-learn     # if your DAG retrains a model
+numpy

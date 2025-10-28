@@ -1,0 +1,10 @@
+apache-beam[gcp]==2.58.0
+
+
+fastapi
+uvicorn[standard]
+pandas
+pyarrow
+joblib
+scikit-learn
+pydantic
