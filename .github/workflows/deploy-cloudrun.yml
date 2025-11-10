@@ -3,14 +3,16 @@ name: CI/CD - Mayo API to Cloud Run
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 env:
-  REGION: ${{ secrets.GCP_REGION }}
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+  # --- Secrets you must set in your repo settings ---
+  REGION: ${{ secrets.GCP_REGION }}                 # Cloud Run region (e.g., us-central1)
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}         # GCP project ID
+  SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}         # Cloud Run service name (e.g., mayo-api)
+  GAR_LOCATION: ${{ secrets.GAR_LOCATION }}         # Artifact Registry location (e.g., us-central1 or us)
+  GAR_REPO: ${{ secrets.GAR_REPO }}                 # Artifact Registry repo name (e.g., mayo-images)
   IMAGE_TAG: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPO }}/mayo-api:${{ github.sha }}
 
 jobs:
@@ -42,15 +44,35 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
+
       - uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
+
+      # -------- Diagnostics: add right after auth/setup-gcloud --------
+      - name: Verify gcloud auth & project
+        run: |
+          gcloud auth list
+          gcloud config list
+          gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)"
+
+      - name: Echo computed image tag
+        run: echo "${IMAGE_TAG}"
+
+      - name: Check Artifact Registry repo exists
+        run: |
+          gcloud artifacts repositories describe "${GAR_REPO}" \
+            --location="${GAR_LOCATION}" || (echo "Repo missing or wrong location" && exit 1)
+      # ----------------------------------------------------------------
+
       - name: Build & push image (Cloud Build)
         run: gcloud builds submit --project "${PROJECT_ID}" --tag "${IMAGE_TAG}" . --quiet
+
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy "${SERVICE}" \
@@ -61,6 +83,7 @@ jobs:
             --allow-unauthenticated \
             --port 8080 \
             --quiet
+
       - name: Output service URL
         run: |
           URL=$(gcloud run services describe "${SERVICE}" --region "${REGION}" --format='value(status.url)')
