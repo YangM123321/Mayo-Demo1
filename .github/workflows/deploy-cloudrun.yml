@@ -46,6 +46,9 @@ jobs:
           docker build -f ${{ env.DOCKERFILE }} -t "$IMAGE" .
           docker push "$IMAGE"
 
+
+      
+
       - name: Deploy to Cloud Run
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -57,7 +60,19 @@ jobs:
             --region "$REGION" \
             --project "$PROJECT_ID" \
             --allow-unauthenticated \
-            --port 8080
+            --port 8080 \
+            --set-env-vars "ENV=prod,SERVICE_NAME=$SERVICE" \
+            --startup-probe=httpGet.path=/healthz,port=8080,initialDelaySeconds=5,timeoutSeconds=2,periodSeconds=5,failureThreshold=12 \
+            --liveness-probe=httpGet.path=/healthz,port=8080,timeoutSeconds=2,periodSeconds=10,failureThreshold=3 \
+            --cpu 1 \
+            --memory 1Gi \
+            --max-instances 3 \
+            --concurrency 40 \
+            --timeout 300
+
+
+
+
 
       - name: Output URL
         env:
