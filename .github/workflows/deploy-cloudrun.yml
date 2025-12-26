@@ -46,8 +46,6 @@ jobs:
           docker build -f ${{ env.DOCKERFILE }} -t "$IMAGE" .
           docker push "$IMAGE"
 
-
-      
       - name: Deploy to Cloud Run
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -60,11 +58,6 @@ jobs:
             --project "$PROJECT_ID" \
             --allow-unauthenticated \
             --port 8080
-
-
-
-
-
 
       - name: Output URL
         env:
