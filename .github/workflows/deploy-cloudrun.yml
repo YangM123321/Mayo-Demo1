@@ -48,27 +48,21 @@ jobs:
 
 
       
-
       - name: Deploy to Cloud Run
-        env:
-          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-          REGION: ${{ secrets.GCP_REGION }}
-          SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
-        run: |
-          gcloud run deploy "$SERVICE" \
-            --image "$IMAGE" \
-            --region "$REGION" \
-            --project "$PROJECT_ID" \
-            --allow-unauthenticated \
-            --port 8080 \
-            --set-env-vars "ENV=prod,SERVICE_NAME=$SERVICE" \
-            --startup-probe=httpGet.path=/healthz,port=8080,initialDelaySeconds=5,timeoutSeconds=2,periodSeconds=5,failureThreshold=12 \
-            --liveness-probe=httpGet.path=/healthz,port=8080,timeoutSeconds=2,periodSeconds=10,failureThreshold=3 \
-            --cpu 1 \
-            --memory 1Gi \
-            --max-instances 3 \
-            --concurrency 40 \
-            --timeout 300
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ secrets.CLOUD_RUN_SERVICE }}
+          image: ${{ env.IMAGE }}
+          region: ${{ secrets.GCP_REGION }}
+          flags: >
+            --allow-unauthenticated
+            --port=8080
+            --set-env-vars=ENV=prod,SERVICE_NAME=${{ secrets.CLOUD_RUN_SERVICE }}
+            --cpu=1
+            --memory=1Gi
+            --max-instances=3
+            --concurrency=40
+            --timeout=300
 
 
 
