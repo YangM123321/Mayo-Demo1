@@ -1,0 +1,26 @@
+      - name: Deploy to Cloud Run (Stage 7)
+        shell: bash
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ secrets.GCP_REGION }}
+          SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+        run: |
+          set -euo pipefail
+
+          # IMAGE was created in "Build & Push image" step and exported to $GITHUB_ENV
+          echo "Deploying $SERVICE with image: $IMAGE"
+
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --allow-unauthenticated \
+            --port 8080 \
+            --set-env-vars "ENV=prod,SERVICE_NAME=${SERVICE}" \
+            --startup-probe=httpGet.path=/healthz,port=8080,initialDelaySeconds=5,timeoutSeconds=2,periodSeconds=5,failureThreshold=12 \
+            --liveness-probe=httpGet.path=/healthz,port=8080,timeoutSeconds=2,periodSeconds=10,failureThreshold=3 \
+            --cpu 1 \
+            --memory 1Gi \
+            --max-instances 3 \
+            --concurrency 40 \
+            --timeout 300
