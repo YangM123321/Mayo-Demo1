@@ -57,7 +57,7 @@ jobs:
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           REGION: ${{ secrets.GCP_REGION }}
-          REPO: ${{ secrets.AR_REPO }}
+          REPO: ${{ secrets.GAR_REPO }}
           SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
           SHA: ${{ github.sha }}
         run: |
