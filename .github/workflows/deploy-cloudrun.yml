@@ -69,3 +69,4 @@ jobs:
             --region "$REGION" \
             --project "$PROJECT_ID" \
             --format="value(status.url)"
+
