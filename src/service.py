@@ -11,6 +11,11 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
+import traceback
+
+
 print("[BOOT] importing src.service", file=sys.stderr, flush=True)
 
 # --- Paths
@@ -59,6 +64,16 @@ async def lifespan(app: FastAPI):
 
 # Attach lifespan at construction time (important!)
 app = FastAPI(title="Mayo Demo API", lifespan=lifespan)
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
+import traceback
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    print(f"[ERROR] {request.method} {request.url} -> {exc}", file=sys.stderr, flush=True)
+    traceback.print_exc()
+    return JSONResponse(status_code=500, content={"error": "internal_error"})
+
 
 # --- Schemas
 class AdmitReq(BaseModel):
@@ -152,3 +167,21 @@ def predict_admission_batch(items: List[AdmitReq]):
 @app.get("/predict/admission/{patient_id}/{encounter_id}", response_model=AdmitResp)
 def predict_admission(patient_id: str, encounter_id: str):
     return _predict_one(patient_id, encounter_id)
+
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
+@app.get("/readyz")
+def readyz():
+    _ = _bundle()
+    return {"ok": True}
+
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    print(f"[ERROR] {request.method} {request.url} -> {exc}", file=sys.stderr, flush=True)
+    traceback.print_exc()
+    return JSONResponse(status_code=500, content={"error": "internal_error"})
