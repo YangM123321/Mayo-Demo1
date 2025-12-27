@@ -40,11 +40,18 @@ jobs:
           echo "REGION=${{ secrets.GCP_REGION }}"
           echo "REPO=${{ secrets.AR_REPO }}"
           echo "SERVICE=${{ secrets.CLOUD_RUN_SERVICE }}"
-
-
+ 
       - name: Configure Docker for Artifact Registry
+        shell: bash
         run: |
-          gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev --quiet
+          set -euo pipefail
+          REGION="${{ secrets.GCP_REGION }}"
+          if [ -z "$REGION" ]; then
+            echo "ERROR: GCP_REGION secret is empty or missing."
+            exit 1
+          fi
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
 
       - name: Build & Push image
         env:
