@@ -22,7 +22,9 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY entrypoint.sh /app/entrypoint.sh
 COPY src/ /app/src/
 COPY models/ /app/models/
-COPY mlflow.db /app/mlflow.db
+#COPY mlflow.db /app/mlflow.db
+RUN touch /app/mlflow.db
+
 
 RUN mkdir -p /app/out
 
