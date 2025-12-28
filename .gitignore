@@ -31,3 +31,6 @@ crashlog.json
 mlflow.db
 *.db
 
+
+!models/admit_lr.joblib
+
