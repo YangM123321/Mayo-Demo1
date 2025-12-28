@@ -1,15 +1,36 @@
+
+
+
 FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080 \
+    MODE=api
 
 WORKDIR /app
 
-COPY requirements.txt .
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl bash \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel
 
-# Copy only what the API needs
-COPY src/ ./src/
-COPY models/ ./models/
-COPY mlflow.db ./mlflow.db
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY entrypoint.sh /app/entrypoint.sh
+COPY src/ /app/src/
+COPY models/ /app/models/
+COPY mlflow.db /app/mlflow.db
+
+RUN mkdir -p /app/out
+
+
+RUN sed -i '1s/^\xEF\xBB\xBF//' /app/entrypoint.sh \
+ && sed -i 's/\r$//' /app/entrypoint.sh \
+ && chmod +x /app/entrypoint.sh
 
 EXPOSE 8080
-CMD ["sh", "-c", "uvicorn src.app_mlflow:app --host 0.0.0.0 --port ${PORT:-8080}"]
+
+ENTRYPOINT ["bash", "/app/entrypoint.sh"]

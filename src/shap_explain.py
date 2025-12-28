@@ -1,9 +1,11 @@
 ﻿# src/shap_explain.py
 from pathlib import Path
+
+import joblib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import joblib, shap
-import matplotlib.pyplot as plt
+import shap
 
 OUT = Path("out")
 MODELS = Path("models")

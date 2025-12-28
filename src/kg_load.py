@@ -1,5 +1,6 @@
 ﻿# src/kg_load.py
 import os
+
 from py2neo import Graph, Node, Relationship
 
 URI  = os.getenv("NEO4J_URI",  "bolt://host.docker.internal:7687")  # or bolt://mayo-neo4j:7687 on a docker network
@@ -28,8 +29,10 @@ links = [
 tx = graph.begin()
 for d in diagnoses:
     tx.merge(Node("Diagnosis", code=d["code"], name=d["name"]), "Diagnosis", "code")
-for l in labs:
-    tx.merge(Node("Lab", loinc=l["loinc"], name=l["name"]), "Lab", "loinc")
+
+for lab in labs:
+    tx.merge(Node("Lab", loinc=lab["loinc"], name=lab["name"]), "Lab", "loinc")
+
 for loinc, icd, rel in links:
     lab = tx.evaluate("MATCH (l:Lab {loinc: $loinc}) RETURN l", loinc=loinc)
     dx  = tx.evaluate("MATCH (d:Diagnosis {code: $code}) RETURN d", code=icd)

@@ -539,3 +539,169 @@ $df = @{
   )
 } | ConvertTo-Json -Depth 4
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:5002/invocations" -Headers @{ "Content-Type"="application/json" } -Body $df
+
+6.CI/CD (GitHub Actions)-Builds and delivers an image (and optionally deploys it).
+Think of Stage 6 as a factory + delivery truck.
+
+git add .github/workflows/deploy-cloudrun.yml
+git commit -m "Debug deploy toolchain"
+git push
+
+
+
+7.Checklist -(Cloud Run startup check)-👉 Runs that image and checks if it listens on $PORT.
+Stage 7 is the first time your code actually runs in Cloud Run.
+
+✅ Stage 7 — SUCCESS VERIFICATION (PowerShell)
+
+1️⃣ Set project + service variables
+$PROJECT_ID="innate-mix-432320-h1"
+$REGION="us-central1"
+$SERVICE="mayo-api"
+
+2️⃣ Get the live Cloud Run URL (source of truth)
+$URL = (gcloud run services describe $SERVICE `
+  --region $REGION `
+  --project $PROJECT_ID `
+  --format="value(status.url)")
+
+$URL
+
+
+✔️ This must return something like:
+
+https://mayo-api-595003759214.us-central1.run.app
+
+3️⃣ Health + readiness checks (required for Stage 7)
+curl "$URL/health"
+curl "$URL/healthz"
+curl "$URL/readyz"
+
+
+Expected results
+
+{"status":"healthy","title":"Mayo Demo API"}
+{"ok":true}
+{"ok":true}
+
+
+✅ Confirms:
+
+container started
+
+probes are working
+
+app state initialized
+
+4️⃣ Route discovery (sanity check)
+curl "$URL/_routes"
+
+
+Must include:
+
+/health
+/healthz
+/readyz
+/predict/admission/{patient_id}/{encounter_id}
+/predict/admission/batch
+
+5️⃣ Single prediction test (real model + GCS features)
+curl "$URL/predict/admission/P001/E001"
+curl "$URL/predict/admission/P002/E003"
+curl "$URL/predict/admission/P003/E007"
+
+
+Expected pattern:
+
+{
+  "patient_id": "P001",
+  "encounter_id": "E001",
+  "probability": 0.99,
+  "label": 1
+}
+
+
+✅ Confirms:
+
+model loaded
+
+GCS parquet downloaded
+
+inference works
+
+6️⃣ Batch prediction test
+$body = @(
+  @{ patient_id = "P001"; encounter_id = "E001" },
+  @{ patient_id = "P002"; encounter_id = "E003" }
+) | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "$URL/predict/admission/batch" `
+  -ContentType "application/json" `
+  -Body $body
+
+
+Expected output:
+
+patient_id encounter_id probability label
+---------- ------------ ----------- -----
+P001       E001         0.99        1
+P002       E003         0.00        0
+
+7️⃣ Logs check (Stage 7 ops proof)
+gcloud logging read `
+  "resource.type=cloud_run_revision AND resource.labels.service_name=$SERVICE" `
+  --project $PROJECT_ID `
+  --limit 50 `
+  --format "value(textPayload)"
+
+
+You should see:
+
+request logs
+
+[BOOT] model + features loaded
+
+no startup failures
+
+✅ FINAL STAGE 7 PASS CRITERIA
+
+Stage 7 is 100% successful if all of these are true:
+
+✔️ health, healthz, readyz return 200
+✔️ Single + batch predictions work
+✔️ No Cloud Run startup failures
+✔️ Logs show model + GCS features loaded
+✔️ Works from a fresh PowerShell session
+
+
+
+8. kafka 
+
+7 — Observability & Ops
+
+Cloud Run logs
+
+Error handling
+
+Health checks
+
+Monitoring / alerts
+
+8 — Data integration
+
+Load real data from BigQuery / GCS
+
+Runtime config via env vars
+
+Secrets Manager
+
+9 — Resume & interview packaging
+
+Architecture diagram
+
+CI/CD section
+
+Talking points for interviews
+

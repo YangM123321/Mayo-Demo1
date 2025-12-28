@@ -23,3 +23,11 @@ data/
 Thumbs.db
 .vscode/
 .idea/
+
+.env*
+crashlog.json
+*.db
+
+mlflow.db
+*.db
+

@@ -28,6 +28,9 @@ RUN sed -i '1s/^\xEF\xBB\xBF//' /app/entrypoint.sh \
  && chmod +x /app/entrypoint.sh
 
 
+
+
+
 EXPOSE 8000 8888
 ENV MODE=api SCRIPT=""
 ENTRYPOINT ["/app/entrypoint.sh"]
@@ -45,10 +48,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 COPY models/ ./models/
-COPY out/features_matrix.parquet ./out/features_matrix.parquet
+# COPY out/features_matrix.parquet ./out/features_matrix.parquet
 
 ENV PORT=8000
 EXPOSE 8000
 CMD ["uvicorn","src.app:app","--host","0.0.0.0","--port","8000"]
+
+
 
 

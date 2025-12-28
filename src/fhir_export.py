@@ -1,6 +1,6 @@
 ﻿import json
 from pathlib import Path
-from datetime import datetime
+
 import pandas as pd
 
 IN_PATH = Path("out/labs_curated.parquet")

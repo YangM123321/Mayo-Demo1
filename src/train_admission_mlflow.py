@@ -1,13 +1,15 @@
 ﻿# src/train_admission_mlflow.py
-from pathlib import Path
-import os, json, joblib
-import numpy as np
-import pandas as pd
-import mlflow, mlflow.sklearn
+import os
 from collections import Counter
-from sklearn.model_selection import train_test_split
+from pathlib import Path
+
+import joblib
+import mlflow
+import mlflow.sklearn
+import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score, classification_report
+from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.model_selection import train_test_split
 
 ROOT = Path.cwd()
 OUT = ROOT / "out"

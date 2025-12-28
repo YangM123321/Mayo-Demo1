@@ -1,0 +1,49 @@
+﻿{
+  "title": "Mayo-Demo1 Observability",
+  "timezone": "browser",
+  "schemaVersion": 36,
+  "version": 2,
+  "refresh": "5s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "API p95 Latency (seconds)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(mayo_api_request_latency_seconds_bucket[5m])) by (le))"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "API Requests (req/s)",
+      "targets": [
+        {
+          "expr": "sum(rate(mayo_api_request_latency_seconds_count[1m]))"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "API Errors Total (rate)",
+      "targets": [
+        {
+          "expr": "sum(rate(mayo_api_errors_total[5m]))"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Kafka Messages (rate)",
+      "targets": [
+        {
+          "expr": "sum(rate(mayo_kafka_messages_total[5m])) by (topic, direction)"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
+    }
+  ]
+}

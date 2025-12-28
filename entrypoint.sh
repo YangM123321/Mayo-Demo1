@@ -1,37 +1,20 @@
+
+
 #!/bin/sh
-set -e
+set -eu
 
-echo "[entrypoint] MODE=${MODE}"
+PORT="${PORT:-8080}"
+MODE="${MODE:-api}"
 
-case "${MODE}" in
-  api)
-    echo "[entrypoint] Starting FastAPI (uvicorn)..."
-    exec uvicorn src.app:main --host 0.0.0.0 --port 8000
-    ;;
-  jupyter)
-    echo "[entrypoint] Starting JupyterLab on 0.0.0.0:8888..."
-    exec jupyter lab \
-      --ServerApp.ip=0.0.0.0 \
-      --ServerApp.port=8888 \
-      --ServerApp.open_browser=False \
-      --ServerApp.token='' \
-      --ServerApp.allow_origin='*' \
-      --ServerApp.allow_root=True
-    ;;
-  script)
-    if [ -z "${SCRIPT}" ]; then
-      echo "[entrypoint] ERROR: SCRIPT env var is empty (e.g., SCRIPT=src/etl_pipeline.py)." >&2
-      exit 1
-    fi
-    echo "[entrypoint] Running script: ${SCRIPT}"
-    exec python "${SCRIPT}"
-    ;;
-  shell)
-    echo "[entrypoint] Opening shell..."
-    exec sh
-    ;;
-  *)
-    echo "[entrypoint] Unknown MODE '${MODE}'. Use one of: api | jupyter | script | shell" >&2
-    exit 2
-    ;;
-esac
+echo "Starting MODE=$MODE on PORT=$PORT"
+
+if [ "$MODE" = "api" ]; then
+  exec uvicorn src.service:app --host 0.0.0.0 --port "$PORT"
+elif [ "$MODE" = "mlflow" ]; then
+  exec uvicorn src.app_mlflow:app --host 0.0.0.0 --port "$PORT"
+  #exec uvicorn src.service:app --host 0.0.0.0 --port "${PORT:-8080}"
+
+else
+  echo "Unknown MODE=$MODE" >&2
+  exit 2
+fi

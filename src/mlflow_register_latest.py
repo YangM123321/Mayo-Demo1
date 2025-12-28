@@ -1,5 +1,6 @@
 # src/mlflow_register_latest.py
 import time
+
 import mlflow
 from mlflow.tracking import MlflowClient
 

@@ -1,5 +1,8 @@
 ﻿# src/deid.py
-import hashlib, hmac, os, datetime as dt
+import datetime as dt
+import hashlib
+import hmac
+import os
 from copy import deepcopy
 
 # Use an env var for secrecy; provide a default for demo

@@ -1,9 +1,12 @@
-import re, random
+import random
+import re
+
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
+
 
 def clean_text(t):
     t = t.lower()
@@ -25,7 +28,9 @@ df["note"] = df["note"].apply(clean_text)
 
 Xtr, Xte, ytr, yte = train_test_split(df["note"], df["label"], test_size=0.2, random_state=42, stratify=df["label"])
 vec = TfidfVectorizer(ngram_range=(1,2), min_df=2)
-Xtr = vec.fit_transform(Xtr); Xte = vec.transform(Xte)
+Xtr = vec.fit_transform(Xtr)
+Xte = vec.transform(Xte)
+
 
 clf = LogisticRegression(max_iter=1000).fit(Xtr, ytr)
 pred = clf.predict(Xte)

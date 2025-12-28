@@ -1,13 +1,16 @@
 # src/app_mlflow.py
+import os
+import traceback
 from pathlib import Path
-from typing import Optional, Dict, Any
-import os, traceback
+from typing import Any, Dict, Optional
+
+import joblib
+import mlflow
+import mlflow.pyfunc
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-import mlflow, mlflow.pyfunc
-import joblib
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = APP_ROOT / "models"
@@ -51,6 +54,8 @@ def startup_load():
 def health():
     b = app.state.model_bundle
     return {"ok": True, "model_source": b["source"], "note": b["note"], "features": FEATURE_ORDER}
+
+
 
 @app.get("/model-info")
 def model_info():
