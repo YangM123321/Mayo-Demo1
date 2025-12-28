@@ -4,21 +4,17 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 CURATED = Path("out") / "labs_curated.parquet"
-OUTDIR  = Path("out") / "viz"
+OUTDIR = Path("out") / "viz"
 OUTDIR.mkdir(parents=True, exist_ok=True)
-OUTPNG  = OUTDIR / "lab_counts.png"
+OUTPNG = OUTDIR / "lab_counts.png"
 
 df = pd.read_parquet(CURATED)
 
 # Expect columns like: loinc, value, unit, patient_id, date
-counts = (
-    df.groupby("loinc")
-      .size()
-      .sort_values(ascending=False)
-)
+counts = df.groupby("loinc").size().sort_values(ascending=False)
 
-plt.figure(figsize=(6,4))
-counts.plot(kind="bar")          # keep default matplotlib style
+plt.figure(figsize=(6, 4))
+counts.plot(kind="bar")  # keep default matplotlib style
 plt.title("Lab observations per LOINC")
 plt.xlabel("LOINC code")
 plt.ylabel("Count")

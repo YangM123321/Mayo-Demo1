@@ -13,11 +13,10 @@ def _configure_std_logging(level: str) -> None:
     root.setLevel(level)
 
     handler = logging.StreamHandler(sys.stdout)
-    formatter = jsonlogger.JsonFormatter(
-        "%(asctime)s %(levelname)s %(name)s %(message)s"
-    )
+    formatter = jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     handler.setFormatter(formatter)
     root.addHandler(handler)
+
 
 def configure_logging(service_name: str, level: str | None = None) -> None:
     lvl = (level or os.getenv("LOG_LEVEL", "INFO")).upper()
@@ -48,6 +47,7 @@ def configure_logging(service_name: str, level: str | None = None) -> None:
 
     # Bind default service to every log line
     structlog.get_logger().info("logging_configured", service=service_name, log_level=lvl)
+
 
 def get_logger(component: str):
     return structlog.get_logger().bind(component=component)

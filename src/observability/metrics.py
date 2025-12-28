@@ -32,7 +32,3 @@ AIRFLOW_TASK_FAILURES = Counter(
     "Airflow task failures (if emitted manually)",
     ["dag_id", "task_id"],
 )
-
-
-
-

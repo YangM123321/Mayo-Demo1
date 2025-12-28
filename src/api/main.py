@@ -12,6 +12,7 @@ log = get_logger("api")
 
 app = FastAPI(title="Mayo-Demo1 API", version="1.0.0")
 
+
 @app.middleware("http")
 async def metrics_and_logging_middleware(request: Request, call_next):
     start = time.time()
@@ -23,7 +24,9 @@ async def metrics_and_logging_middleware(request: Request, call_next):
         status = str(response.status_code)
         elapsed = time.time() - start
         if settings.metrics_enabled:
-            API_REQUEST_LATENCY.labels(route=route, method=method, status_code=status).observe(elapsed)
+            API_REQUEST_LATENCY.labels(route=route, method=method, status_code=status).observe(
+                elapsed
+            )
 
         log.info(
             "http_request",
@@ -38,7 +41,9 @@ async def metrics_and_logging_middleware(request: Request, call_next):
         elapsed = time.time() - start
         if settings.metrics_enabled:
             API_ERRORS_TOTAL.labels(route=route, method=method, error_type=type(e).__name__).inc()
-            API_REQUEST_LATENCY.labels(route=route, method=method, status_code="500").observe(elapsed)
+            API_REQUEST_LATENCY.labels(route=route, method=method, status_code="500").observe(
+                elapsed
+            )
 
         log.exception(
             "http_error",
@@ -49,9 +54,11 @@ async def metrics_and_logging_middleware(request: Request, call_next):
         )
         raise
 
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "env": settings.env}
+
 
 @app.get("/metrics")
 def metrics():
@@ -60,21 +67,10 @@ def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-
-
-
-
-
-
-
 @app.get("/boom")
 def boom():
     """
     Intentional error endpoint to test error metrics & dashboards
     """
-    API_ERRORS_TOTAL.labels(
-        route="/boom",
-        method="GET",
-        error_type="intentional_test"
-    ).inc()
+    API_ERRORS_TOTAL.labels(route="/boom", method="GET", error_type="intentional_test").inc()
     raise HTTPException(status_code=500, detail="Intentional error for testing")

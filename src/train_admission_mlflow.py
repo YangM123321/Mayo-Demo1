@@ -1,4 +1,4 @@
-﻿# src/train_admission_mlflow.py
+# src/train_admission_mlflow.py
 import os
 from collections import Counter
 from pathlib import Path
@@ -28,21 +28,29 @@ mlflow.set_experiment("admission_risk_demo")
 # ----- Load data and build label
 df = pd.read_parquet(OUT / "labs_curated.parquet")
 df["admit_label"] = (
-    ((df["loinc"] == "2345-7") & (df["lab_value"] >= 150)) |
-    ((df["loinc"] == "718-7")  & (df["lab_value"] < 11.5))
+    ((df["loinc"] == "2345-7") & (df["lab_value"] >= 150))
+    | ((df["loinc"] == "718-7") & (df["lab_value"] < 11.5))
 ).astype(int)
 
-feat = (df.pivot_table(index=["patient_id","encounter_id"],
-                       columns="loinc", values="lab_value", aggfunc="mean")
-          .reset_index().rename_axis(None, axis=1)).fillna(0.0)
+feat = (
+    df.pivot_table(
+        index=["patient_id", "encounter_id"], columns="loinc", values="lab_value", aggfunc="mean"
+    )
+    .reset_index()
+    .rename_axis(None, axis=1)
+).fillna(0.0)
 
-feature_cols = ["2345-7","718-7"] if {"2345-7","718-7"}.issubset(feat.columns) else feat.columns.tolist()[2:]
+feature_cols = (
+    ["2345-7", "718-7"] if {"2345-7", "718-7"}.issubset(feat.columns) else feat.columns.tolist()[2:]
+)
 X = feat[feature_cols].values
-y = (df.groupby(["patient_id","encounter_id"])["admit_label"]
-        .max()
-        .reindex(list(zip(feat["patient_id"], feat["encounter_id"])))
-        .astype(int)
-        .values)
+y = (
+    df.groupby(["patient_id", "encounter_id"])["admit_label"]
+    .max()
+    .reindex(list(zip(feat["patient_id"], feat["encounter_id"])))
+    .astype(int)
+    .values
+)
 
 # ----- Tiny-data safe split
 counts = Counter(y)

@@ -1,4 +1,4 @@
-﻿# src/shap_explain.py
+# src/shap_explain.py
 from pathlib import Path
 
 import joblib
@@ -61,12 +61,14 @@ except Exception:
     sv_raw = explainer.shap_values(X, nsamples="auto")
     ev_raw = explainer.expected_value
 
+
 def to_scalar_base(ev):
     """Return a scalar base value from any SHAP expected_value structure."""
     if isinstance(ev, (list, tuple, np.ndarray)):
         ev = np.array(ev)
         ev = np.ravel(ev)[-1]
     return float(ev)
+
 
 def pick_2d_shap(sv, n_samples, n_features):
     """
@@ -97,6 +99,7 @@ def pick_2d_shap(sv, n_samples, n_features):
     if arr2.ndim == 2:
         return arr2
     raise ValueError(f"Unexpected SHAP ndim={arr.ndim}")
+
 
 n_samples, n_features = X.shape
 sv_all = pick_2d_shap(sv_raw, n_samples, n_features)
@@ -161,4 +164,6 @@ except Exception as e:
 print("Wrote:")
 print(" ", PLOTS / "shap_global_bar.png")
 print(" ", PLOTS / "shap_waterfall_first.png", "(fallback used)" if not saved_waterfall else "")
-print(" ", PLOTS / "shap_force_first.html" if saved_force else "  (force plot skipped; see ERROR.txt)")
+print(
+    " ", PLOTS / "shap_force_first.html" if saved_force else "  (force plot skipped; see ERROR.txt)"
+)

@@ -37,4 +37,3 @@ while True:
 
 client.set_registered_model_alias(MODEL_NAME, ALIAS, mv.version)
 print(f"Registered {MODEL_NAME} v{mv.version} and set alias '{ALIAS}'.")
-

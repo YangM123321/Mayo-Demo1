@@ -1,4 +1,4 @@
-﻿import os
+import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -7,6 +7,7 @@ def _pick_env_file() -> str:
     # ENV selects: dev / staging / prod
     env = os.getenv("ENV", "dev")
     return f".env.{env}"
+
 
 class Settings(BaseSettings):
     env: str = "dev"
@@ -26,5 +27,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
 
 settings = Settings()

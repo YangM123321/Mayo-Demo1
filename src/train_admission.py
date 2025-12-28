@@ -1,4 +1,4 @@
-﻿# src/train_admission.py
+# src/train_admission.py
 import json
 from collections import Counter
 from pathlib import Path
@@ -18,14 +18,15 @@ OUT.mkdir(exist_ok=True, parents=True)
 DATA = OUT / "labs_curated.parquet"  # created by your ETL
 REPORT_TXT = OUT / "ml_report.txt"
 
+
 def main():
     # ---- 1) Load curated data and create label
     df = pd.read_parquet(DATA)
 
     # demo rule: high glucose >=150 OR low hgb <11.5 -> positive
     df["admit_label"] = (
-        ((df["loinc"] == "2345-7") & (df["lab_value"] >= 150)) |
-        ((df["loinc"] == "718-7")  & (df["lab_value"] < 11.5))
+        ((df["loinc"] == "2345-7") & (df["lab_value"] >= 150))
+        | ((df["loinc"] == "718-7") & (df["lab_value"] < 11.5))
     ).astype(int)
 
     # ---- 2) Wide features by LOINC per encounter
@@ -52,10 +53,10 @@ def main():
     # y: max label per encounter
     y = (
         df.groupby(["patient_id", "encounter_id"])["admit_label"]
-          .max()
-          .reindex(list(zip(feat["patient_id"], feat["encounter_id"])))
-          .astype(int)
-          .values
+        .max()
+        .reindex(list(zip(feat["patient_id"], feat["encounter_id"])))
+        .astype(int)
+        .values
     )
 
     # ---- 3) Tiny-data safe split
@@ -99,11 +100,7 @@ def main():
 
     # Save combined report
     REPORT_TXT.write_text(
-        "=== LogisticRegression ===\n"
-        + rep_lr
-        + "\n\n=== RandomForest ===\n"
-        + rep_rf
-        + "\n",
+        "=== LogisticRegression ===\n" + rep_lr + "\n\n=== RandomForest ===\n" + rep_rf + "\n",
         encoding="utf-8",
     )
 
@@ -112,6 +109,7 @@ def main():
     print("  models/admit_rf.joblib")
     print("  models/feature_list.json")
     print(f"  {REPORT_TXT}")
+
 
 if __name__ == "__main__":
     main()

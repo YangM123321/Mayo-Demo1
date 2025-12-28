@@ -1,4 +1,4 @@
-﻿# src/evaluate_admission.py
+# src/evaluate_admission.py
 from pathlib import Path
 
 import joblib
@@ -14,13 +14,14 @@ PLOTS.mkdir(parents=True, exist_ok=True)
 
 DATA = OUT / "labs_curated.parquet"
 
+
 def load_features_and_labels():
     df = pd.read_parquet(DATA)
 
     # same label definition as training
     df["admit_label"] = (
-        ((df["loinc"] == "2345-7") & (df["lab_value"] >= 150)) |
-        ((df["loinc"] == "718-7")  & (df["lab_value"] < 11.5))
+        ((df["loinc"] == "2345-7") & (df["lab_value"] >= 150))
+        | ((df["loinc"] == "718-7") & (df["lab_value"] < 11.5))
     ).astype(int)
 
     feat = (
@@ -44,12 +45,13 @@ def load_features_and_labels():
     X = feat[feature_cols].values
     y = (
         df.groupby(["patient_id", "encounter_id"])["admit_label"]
-          .max()
-          .reindex(list(zip(feat["patient_id"], feat["encounter_id"])))
-          .astype(int)
-          .values
+        .max()
+        .reindex(list(zip(feat["patient_id"], feat["encounter_id"])))
+        .astype(int)
+        .values
     )
     return X, y, feature_cols
+
 
 def plot_curves(model, X, y, name: str):
     # get scores
@@ -90,6 +92,7 @@ def plot_curves(model, X, y, name: str):
     print(f"  {PLOTS / f'roc_{name}.png'}")
     print(f"  {PLOTS / f'pr_{name}.png'}")
 
+
 def main():
     X, y, _ = load_features_and_labels()
 
@@ -108,6 +111,7 @@ def main():
         plot_curves(rf, X, y, "random_forest")
     else:
         print("Skip: models/admit_rf.joblib not found")
+
 
 if __name__ == "__main__":
     main()

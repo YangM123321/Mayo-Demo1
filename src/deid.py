@@ -1,4 +1,4 @@
-﻿# src/deid.py
+# src/deid.py
 import datetime as dt
 import hashlib
 import hmac
@@ -8,13 +8,16 @@ from copy import deepcopy
 # Use an env var for secrecy; provide a default for demo
 DEID_SALT = os.environ.get("DEID_SALT", "change-me-demo-salt").encode()
 
+
 def _hash_id(raw: str) -> str:
     """Stable, non-reversible pseudonym using HMAC-SHA256."""
     return hmac.new(DEID_SALT, raw.encode(), hashlib.sha256).hexdigest()[:16]
 
+
 def _patient_offset(pid: str) -> int:
     """Stable 0..180-day offset per patient."""
     return int(hashlib.sha1((pid + "dates").encode()).hexdigest(), 16) % 181
+
 
 def _shift_date(iso_dt: str, days: int) -> str:
     # Accepts "YYYY-MM-DD" or "...T...Z"; returns full ISO date-time with Z
@@ -24,6 +27,7 @@ def _shift_date(iso_dt: str, days: int) -> str:
     else:
         d = dt.datetime.fromisoformat(base + "T00:00:00")
     return (d + dt.timedelta(days=days)).isoformat(timespec="seconds") + "Z"
+
 
 def deid_observation(obs: dict) -> dict:
     """
@@ -64,5 +68,3 @@ def deid_observation(obs: dict) -> dict:
             o["valueQuantity"] = vq
 
     return o
-
-

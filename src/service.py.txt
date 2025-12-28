@@ -15,10 +15,8 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse
 from google.cloud import storage
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from pydantic import BaseModel
 from starlette.requests import Request
-
-# ✅ Contracts (single source of truth)
-from src.contracts.predictions import AdmitReq, AdmitResp
 
 print("[BOOT] importing src.service", file=sys.stderr, flush=True)
 
@@ -164,6 +162,21 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 # -----------------------------
+# Schemas
+# -----------------------------
+class AdmitReq(BaseModel):
+    patient_id: str
+    encounter_id: str
+
+
+class AdmitResp(BaseModel):
+    patient_id: str
+    encounter_id: str
+    probability: float
+    label: int
+
+
+# -----------------------------
 # Helpers
 # -----------------------------
 def _bundle():
@@ -212,7 +225,6 @@ def _predict_one(pid: str, enc: str) -> Dict[str, Any]:
         p = float(model.predict_proba(X)[:, 1][0])
     except Exception:
         p = 0.0
-
     return {"patient_id": pid, "encounter_id": enc, "probability": p, "label": int(p >= 0.5)}
 
 
@@ -235,27 +247,41 @@ def list_routes():
     return sorted([getattr(r, "path", "") for r in app.routes])
 
 
+
+
+
 @app.get("/readyz")
 def readyz():
     _ = _bundle()
     return {"ok": True}
 
 
-@app.post("/predict/admission/batch", response_model=list[AdmitResp])
+@app.post("/predict/admission/batch")
 def predict_admission_batch(items: List[AdmitReq]):
     if not items:
         return []
-    out: List[AdmitResp] = []
+    out: List[Dict[str, Any]] = []
     for it in items:
-        # ✅ enforce response contract too
-        out.append(AdmitResp(**_predict_one(it.patient_id, it.encounter_id)))
+        try:
+            out.append(_predict_one(it.patient_id, it.encounter_id))
+        except HTTPException as e:
+            out.append(
+                {
+                    "patient_id": it.patient_id,
+                    "encounter_id": it.encounter_id,
+                    "error": str(e.detail),
+                }
+            )
+        except Exception as e:
+            out.append(
+                {"patient_id": it.patient_id, "encounter_id": it.encounter_id, "error": str(e)}
+            )
     return out
 
 
 @app.get("/predict/admission/{patient_id}/{encounter_id}", response_model=AdmitResp)
 def predict_admission(patient_id: str, encounter_id: str):
-    # ✅ enforce response contract
-    return AdmitResp(**_predict_one(patient_id, encounter_id))
+    return _predict_one(patient_id, encounter_id)
 
 
 @app.get("/metrics")
@@ -266,3 +292,7 @@ def metrics():
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
+
+
+
+    

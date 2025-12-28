@@ -5,23 +5,27 @@ import pandas as pd
 from py2neo import Graph
 
 # --- Neo4j config from env (works from Docker) ---
-uri  = os.getenv("NEO4J_URI",  "bolt://host.docker.internal:7687")  # or bolt://mayo-neo4j:7687 on a docker network
+uri = os.getenv(
+    "NEO4J_URI", "bolt://host.docker.internal:7687"
+)  # or bolt://mayo-neo4j:7687 on a docker network
 user = os.getenv("NEO4J_USER", "neo4j")
-pwd  = os.getenv("NEO4J_PASS", "testpass")
+pwd = os.getenv("NEO4J_PASS", "testpass")
 
 print(f"[etl] Connecting to Neo4j at {uri} as {user}")
 graph = Graph(uri, auth=(user, pwd))
 
 REQUIRED = {"patient_id", "encounter_id", "loinc", "lab_value", "unit", "collected_date"}
 
+
 def fetch_dx_for_loinc(g: Graph, loinc: str):
     q = "MATCH (:Lab {loinc:$loinc})-[]->(d:Diagnosis) RETURN collect(d.code) AS dx"
     res = g.run(q, loinc=loinc).data()
     return res[0]["dx"] if res else []
 
+
 def main():
     # input/output paths (ensure 'out/' exists)
-    in_path  = "out/labs_clean.parquet"
+    in_path = "out/labs_clean.parquet"
     out_path = "out/labs_curated.parquet"
 
     # load
@@ -38,6 +42,7 @@ def main():
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     df.to_parquet(out_path, index=False)
     print(f"[etl] Wrote {out_path}")
+
 
 if __name__ == "__main__":
     main()
