@@ -4,9 +4,6 @@ from src.contracts.predictions import AdmitReq
 from src.contracts.vitals import VitalEvent  # adjust to your class name
 
 
-
-
-
 def test_admit_req_valid():
     AdmitReq(patient_id="p1", encounter_id="e1")
 

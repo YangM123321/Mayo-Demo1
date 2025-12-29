@@ -1,0 +1,27 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Data / artifacts
+data/
+artifacts/
+mlruns/
+*.parquet
+*.csv
+*.pkl
+
+# Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Git / OS
+.git/
+.DS_Store
+Thumbs.db
+
+# Node / misc (if any)
+node_modules/

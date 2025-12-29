@@ -8,3 +8,13 @@ __pycache__/
 *.pyc
 .git/
 .gitignore
+# Prevent accidentally baking artifacts into images
+**/*.parquet
+**/*.pkl
+**/*.joblib
+**/*.onnx
+**/*.bin
+**/mlruns
+**/data
+**/artifacts
+tmp

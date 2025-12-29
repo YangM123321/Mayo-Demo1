@@ -1,0 +1,15 @@
+
+
+
+
+model:
+  uri: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/admit_lr.joblib
+  min_bytes: 1
+
+features:
+  uri: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/features_matrix.parquet
+  min_bytes: 1
+
+feature_list:
+  uri: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/feature_list.json
+  min_bytes: 1

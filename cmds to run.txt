@@ -551,6 +551,8 @@ git push
 
 7.Checklist -(Cloud Run startup check)-👉 Runs that image and checks if it listens on $PORT.
 Stage 7 is the first time your code actually runs in Cloud Run.
+Stage 7 = Cloud Run deploy working + health endpoints + GCS features.
+
 
 ✅ Stage 7 — SUCCESS VERIFICATION (PowerShell)
 
@@ -677,17 +679,11 @@ Stage 7 is 100% successful if all of these are true:
 
 
 
-8. kafka 
+8. Stage 8 = “Production demo polish” (observability + reliability + demo readiness). kafka 
+Kafka is Stage 8 only if your demo requires streaming, like:
 
-7 — Observability & Ops
+“Vitals events → topic → consumer → feature store → predict”
 
-Cloud Run logs
-
-Error handling
-
-Health checks
-
-Monitoring / alerts
 
 8 — Data integration
 
@@ -704,4 +700,27 @@ Architecture diagram
 CI/CD section
 
 Talking points for interviews
+
+===================
+
+$exclude = @(
+  "Mayo-Demo1\.venv\*",
+  "Mayo-Demo1\.train\*",
+  "Mayo-Demo1\.beam\*",
+  "Mayo-Demo1\.pytest_cache\*"
+)
+
+Compress-Archive `
+  -Path Mayo-Demo1\* `
+  -DestinationPath Mayo-Demo1-clean.zip `
+  -Exclude $exclude `
+  -CompressionLevel Optimal
+
+tar -a -c -f Mayo-Demo1-clean.zip `
+  --exclude=".venv" `
+  --exclude=".train" `
+  --exclude=".git" `
+  --exclude=".beam" `
+  --exclude=".pytest_cache" `
+  Mayo-Demo1
 

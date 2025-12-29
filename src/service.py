@@ -13,98 +13,34 @@ import joblib
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse
-from google.cloud import storage
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.requests import Request
 
-# ✅ Contracts (single source of truth)
 from src.contracts.predictions import AdmitReq, AdmitResp
+from src.bootstrap.artifacts import ArtifactError, bootstrap_stage5
+from src.bootstrap.manifest import bootstrap_from_manifest
 
 print("[BOOT] importing src.service", file=sys.stderr, flush=True)
 
-# -----------------------------
-# Paths (inside container /app)
-# -----------------------------
-BASE = Path("/app")
-OUT = BASE / "out"
-MODELS = BASE / "models"
 
-MODEL_PATH = MODELS / "admit_lr.joblib"
-FEATURES_PATH = MODELS / "feature_list.json"
-
-# Default bundled location (if you bake the parquet into the image)
-DEFAULT_FEATURES_TABLE = OUT / "features_matrix.parquet"
-FEATURES_TABLE = None  # will be loaded during startup
+def _require_file(p: Path, label: str) -> None:
+    if not p.exists() or p.stat().st_size == 0:
+        raise RuntimeError(f"{label} missing or empty: {p}")
 
 
-def _parse_gs_uri(uri: str) -> tuple[str, str]:
-    # gs://bucket/path/to/blob
-    if not uri.startswith("gs://"):
-        raise ValueError(f"Not a gs:// URI: {uri}")
-    no_scheme = uri[5:]
-    bucket, _, blob = no_scheme.partition("/")
-    if not bucket or not blob:
-        raise ValueError(f"Invalid gs:// URI: {uri}")
-    return bucket, blob
-
-
-def _ensure_features_local() -> Path:
-    """
-    Decide where the features parquet is and ensure it exists locally.
-
-    Priority:
-      1) FEATURES_URI=gs://...  -> download to /tmp/features_matrix.parquet
-      2) FEATURES_URI=/some/local/path -> use that
-      3) default bundled file: /app/out/features_matrix.parquet
-    """
-    features_uri = os.getenv("FEATURES_URI", "").strip()
-
-    # 3) default bundled
-    if not features_uri:
-        return DEFAULT_FEATURES_TABLE
-
-    # 2) local path
-    if features_uri.startswith("/"):
-        return Path(features_uri)
-
-    # 1) gs:// download
-    if features_uri.startswith("gs://"):
-        dst = Path("/tmp/features_matrix.parquet")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-
-        # download only if missing/empty
-        if (not dst.exists()) or dst.stat().st_size == 0:
-            bucket_name, blob_name = _parse_gs_uri(features_uri)
-
-            proj = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCLOUD_PROJECT")
-            print(
-                f"[BOOT] GOOGLE_CLOUD_PROJECT={os.getenv('GOOGLE_CLOUD_PROJECT')} GCLOUD_PROJECT={os.getenv('GCLOUD_PROJECT')}",
-                file=sys.stderr,
-                flush=True,
-            )
-            print("[BOOT] service.py VERSION=2025-12-27", file=sys.stderr, flush=True)
-
-            client = storage.Client(project=proj)
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(blob_name)
-            blob.download_to_filename(str(dst))
-            print(f"[BOOT] downloaded FEATURES_URI -> {dst}", file=sys.stderr, flush=True)
-
-        return dst
-
-    # Unknown scheme -> fallback
-    return DEFAULT_FEATURES_TABLE
+def _as_path(x: Optional[str]) -> Optional[Path]:
+    return Path(x) if x else None
 
 
 # -----------------------------
-# Lifespan
+# Lifespan (BOOTSTRAP FIRST)
 # -----------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.model_bundle = None
+    app.state.bootstrap = {}
 
     skip = os.getenv("SKIP_MODEL_LOAD", "").strip().lower() in {"1", "true", "yes"}
-
     if skip:
 
         class _Dummy:
@@ -114,43 +50,90 @@ async def lifespan(app: FastAPI):
                 n = len(X)
                 return np.c_[np.zeros(n), np.zeros(n)]  # shape (n,2)
 
-        app.state.model_bundle = {
-            "model": _Dummy(),
-            "features": [],
-            "features_df": None,
-        }
+        app.state.model_bundle = {"model": _Dummy(), "features": [], "features_df": None}
         print("[BOOT] SKIP_MODEL_LOAD=1 -> dummy model bundle", file=sys.stderr, flush=True)
         yield
         return
 
-    # Resolve features table location (may download from GCS)
-    features_table = _ensure_features_local()
+    # ✅ Stage 5 MUST run before any file checks/loads
+    try:
+        if os.getenv("ARTIFACT_MANIFEST_URI"):
+            boot = bootstrap_from_manifest()
+        else:
+            boot = bootstrap_stage5()
+        app.state.bootstrap = boot
+    except ArtifactError as e:
+        raise RuntimeError(f"Stage 5 bootstrap failed: {e}") from e
 
-    # Validate artifacts
-    if not MODEL_PATH.exists():
-        raise RuntimeError(f"MODEL missing: {MODEL_PATH}")
-    if not FEATURES_PATH.exists():
-        raise RuntimeError(f"FEATURE LIST missing: {FEATURES_PATH}")
-    if not features_table.exists():
-        raise RuntimeError(f"FEATURES TABLE missing: {features_table}")
+    # Stage 5 returns local paths in /tmp/artifacts/...
+    model_path = _as_path(app.state.bootstrap.get("model_path"))
+    features_table_path = _as_path(app.state.bootstrap.get("features_path"))
+
+    # You ALSO need feature_list.json as an artifact.
+    # We support either:
+    # 1) LOCAL_FEATURE_LIST_PATH set by bootstrap
+    # 2) CONFIG includes it
+    # 3) fallback env FEATURE_LIST_PATH
+    feature_list_path = _as_path(app.state.bootstrap.get("feature_list_path")) or _as_path(
+        os.getenv("FEATURE_LIST_PATH")
+    )
+
+    # Validate
+    if not model_path:
+        raise RuntimeError("bootstrap did not provide model_path")
+    if not features_table_path:
+        raise RuntimeError("bootstrap did not provide features_path (features parquet)")
+    if not feature_list_path:
+        raise RuntimeError(
+            "feature_list_path not provided. Add it to Stage 5 manifest or set FEATURE_LIST_PATH."
+        )
+
+    _require_file(model_path, "MODEL")
+    _require_file(feature_list_path, "FEATURE LIST")
+    _require_file(features_table_path, "FEATURES TABLE")
 
     # Load
-    model = joblib.load(MODEL_PATH)
-    features = json.loads(FEATURES_PATH.read_text())
-    features_df = pd.read_parquet(features_table)
+    model = joblib.load(model_path)
+    features = json.loads(feature_list_path.read_text(encoding="utf-8"))
+    features_df = pd.read_parquet(features_table_path)
 
     app.state.model_bundle = {
         "model": model,
         "features": features,
         "features_df": features_df,
-        "features_table": str(features_table),
+        "features_table": str(features_table_path),
+        "model_path": str(model_path),
+        "feature_list_path": str(feature_list_path),
     }
-    print(f"[BOOT] model + features loaded (table={features_table})", file=sys.stderr, flush=True)
+
+    print(
+        f"[BOOT] model+features loaded "
+        f"(model={model_path}, feature_list={feature_list_path}, table={features_table_path})",
+        file=sys.stderr,
+        flush=True,
+    )
 
     yield
 
 
 app = FastAPI(title="Mayo Demo API", lifespan=lifespan)
+
+
+@app.get("/healthz")
+def healthz():
+    boot = getattr(app.state, "bootstrap", {}) or {}
+    b = getattr(app.state, "model_bundle", None)
+    return {
+        "ok": True,
+        "bootstrap": {
+            "model_path": boot.get("model_path"),
+            "features_path": boot.get("features_path"),
+            "config_path": boot.get("config_path"),
+            "feature_list_path": boot.get("feature_list_path"),
+        },
+        "loaded": bool(b),
+        "loaded_paths": (b or {}),
+    }
 
 
 # -----------------------------
@@ -204,7 +187,6 @@ def _predict_one(pid: str, enc: str) -> Dict[str, Any]:
         raise HTTPException(503, "Model not available")
 
     if feat_df is None:
-        # Dummy mode
         feat_df = pd.DataFrame([{"patient_id": pid, "encounter_id": enc}])
 
     X = _row_for(pid, enc, feat_df=feat_df, features=features)
@@ -247,22 +229,15 @@ def predict_admission_batch(items: List[AdmitReq]):
         return []
     out: List[AdmitResp] = []
     for it in items:
-        # ✅ enforce response contract too
         out.append(AdmitResp(**_predict_one(it.patient_id, it.encounter_id)))
     return out
 
 
 @app.get("/predict/admission/{patient_id}/{encounter_id}", response_model=AdmitResp)
 def predict_admission(patient_id: str, encounter_id: str):
-    # ✅ enforce response contract
     return AdmitResp(**_predict_one(patient_id, encounter_id))
 
 
 @app.get("/metrics")
 def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
-
-@app.get("/healthz")
-def healthz():
-    return {"status": "ok"}

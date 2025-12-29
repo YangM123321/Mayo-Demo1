@@ -1,3 +1,4 @@
+
 name: CI
 
 on:
@@ -8,19 +9,79 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 15
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
+          pip install -r requirements.txt
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-
       - name: Run tests
         run: |
           if python -c "import pytest" 2>/dev/null; then pytest -q; else echo "pytest not installed, skipping"; fi
+
+      - name: Ruff lint
+        run: ruff check src
+
+      - name: Ruff format check
+        run: ruff format --check src
+
+      - name: Pytest
+        run: pytest -q
+
+  docker_smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t mayo-demo-ci:local .
+
+      - name: Run container (smoke)
+        env:
+          PORT: "8080"
+          MODE: "api"
+          # IMPORTANT:
+          # Your service currently boots by downloading artifacts from GCS using ARTIFACT_MANIFEST_URI.
+          # For CI smoke test, we can point it to a small "test manifest" (recommended) OR let the app skip artifact boot in CI.
+          #
+          # EASIEST (recommended): implement SKIP_ARTIFACT_BOOT=1 in your app startup.
+          SKIP_ARTIFACT_BOOT: "1"
+        run: |
+          docker run -d --rm \
+            -e PORT=8080 \
+            -e MODE=api \
+            -e SKIP_ARTIFACT_BOOT=1 \
+            -p 8080:8080 \
+            --name mayo-ci \
+            mayo-demo-ci:local
+
+          # wait for boot
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8080/health > /dev/null; then
+              echo "Health OK"
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS http://localhost:8080/health
+          docker logs mayo-ci --tail 200
+          docker stop mayo-ci

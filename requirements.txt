@@ -38,3 +38,7 @@ pydantic
 # Dev tooling (used by CI)
 pytest
 ruff
+
+google-cloud-storage>=2.14.0
+pyyaml>=6.0.1
+
