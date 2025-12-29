@@ -15,6 +15,8 @@ env:
   AR_REPO: ${{ secrets.GAR_REPO }}
   IMAGE_NAME: mayo-api
 
+
+
 jobs:
   ci_gates:
     runs-on: ubuntu-latest
