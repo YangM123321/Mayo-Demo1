@@ -10,10 +10,10 @@ permissions:
   id-token: write
 
 env:
-  PROJECT_ID: "${{ secrets.GCP_PROJECT_ID }}"
-  REGION: "${{ secrets.GCP_REGION }}"
-  GAR_REPO: "${{ secrets.GAR_REPO }}"
-  IMAGE_NAME: "mayo-api"
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ secrets.GCP_REGION }}
+  GAR_REPO: ${{ secrets.GAR_REPO }}
+  IMAGE_NAME: mayo-api
 
 jobs:
   ci_gates:
@@ -43,16 +43,13 @@ jobs:
 
       - name: Pytest
         env:
-          PYTHONPATH: "."
+          PYTHONPATH: .
         run: pytest -q
 
   build_and_push:
     needs: ci_gates
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
-    outputs:
-      image_uri: ${{ steps.jobout.outputs.image_uri }}
 
     steps:
       - uses: actions/checkout@v4
@@ -66,21 +63,20 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_id: ${{ env.PROJECT_ID }}
 
       - name: Configure Docker auth for Artifact Registry
         shell: bash
         run: |
           set -euo pipefail
-          gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-      - name: Compute image URI (save to env)
-        id: meta
+      - name: Compute IMAGE_URI
         shell: bash
         run: |
           set -euo pipefail
           SHORT_SHA="${GITHUB_SHA::7}"
-          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPO }}/${{ env.IMAGE_NAME }}:${SHORT_SHA}"
+          IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPO}/${IMAGE_NAME}:${SHORT_SHA}"
           echo "IMAGE_URI=${IMAGE_URI}" >> "$GITHUB_ENV"
           echo "Computed IMAGE_URI=${IMAGE_URI}"
 
@@ -92,50 +88,47 @@ jobs:
           docker build -f Dockerfile.api -t "${IMAGE_URI}" .
           docker push "${IMAGE_URI}"
 
-      - name: Export job output image_uri (FINAL)
-        id: jobout
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${IMAGE_URI}" || (echo "ERROR: IMAGE_URI empty at export" && exit 1)
-          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
-          echo "Exported job output image_uri=${IMAGE_URI}"
-
   deploy_staging:
     needs: build_and_push
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
-    outputs:
-      staging_url: "${{ steps.out.outputs.staging_url }}"
-
     steps:
       - name: Auth to Google (WIF)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: "${{ secrets.WIF_PROVIDER }}"
-          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Compute IMAGE_URI (same tag as build)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPO}/${IMAGE_NAME}:${SHORT_SHA}"
+          echo "IMAGE_URI=${IMAGE_URI}" >> "$GITHUB_ENV"
+          echo "Computed IMAGE_URI=${IMAGE_URI}"
 
       - name: Verify deploy inputs
         shell: bash
         run: |
           set -euo pipefail
           echo "SERVICE=${{ secrets.CLOUD_RUN_STAGING_SERVICE }}"
-          echo "IMAGE=${{ needs.build_and_push.outputs.image_uri }}"
+          echo "IMAGE=${IMAGE_URI}"
           test -n "${{ secrets.CLOUD_RUN_STAGING_SERVICE }}" || (echo "Missing CLOUD_RUN_STAGING_SERVICE" && exit 1)
-          test -n "${{ needs.build_and_push.outputs.image_uri }}" || (echo "Missing image_uri output" && exit 1)
+          test -n "${IMAGE_URI}" || (echo "Missing IMAGE_URI" && exit 1)
 
       - name: Deploy to Cloud Run (staging)
         shell: bash
         run: |
           set -euo pipefail
           gcloud run deploy "${{ secrets.CLOUD_RUN_STAGING_SERVICE }}" \
-            --image "${{ needs.build_and_push.outputs.image_uri }}" \
+            --image "${IMAGE_URI}" \
             --region "${REGION}" \
             --project "${PROJECT_ID}" \
             --allow-unauthenticated \
@@ -147,9 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           STAGING_URL="$(gcloud run services describe "${{ secrets.CLOUD_RUN_STAGING_SERVICE }}" \
-            --region "${REGION}" \
-            --project "${PROJECT_ID}" \
-            --format='value(status.url)')"
+            --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.url)')"
           echo "staging_url=${STAGING_URL}" >> "$GITHUB_OUTPUT"
           echo "Staging URL: ${STAGING_URL}"
 
@@ -163,25 +154,35 @@ jobs:
     needs: deploy_staging
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: prod
 
     steps:
       - name: Auth to Google (WIF)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: "${{ secrets.WIF_PROVIDER }}"
-          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Compute IMAGE_URI (same tag as build)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPO}/${IMAGE_NAME}:${SHORT_SHA}"
+          echo "IMAGE_URI=${IMAGE_URI}" >> "$GITHUB_ENV"
+          echo "Computed IMAGE_URI=${IMAGE_URI}"
 
       - name: Deploy to Cloud Run (prod)
         shell: bash
         run: |
           set -euo pipefail
           gcloud run deploy "${{ secrets.CLOUD_RUN_PROD_SERVICE }}" \
-            --image "${{ needs.build_and_push.outputs.image_uri }}" \
+            --image "${IMAGE_URI}" \
             --region "${REGION}" \
             --project "${PROJECT_ID}" \
             --allow-unauthenticated \
@@ -192,8 +193,6 @@ jobs:
         run: |
           set -euo pipefail
           PROD_URL="$(gcloud run services describe "${{ secrets.CLOUD_RUN_PROD_SERVICE }}" \
-            --region "${REGION}" \
-            --project "${PROJECT_ID}" \
-            --format='value(status.url)')"
+            --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.url)')"
           echo "Prod URL: ${PROD_URL}"
           curl -fsS "${PROD_URL}/health"
