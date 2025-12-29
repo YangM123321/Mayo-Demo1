@@ -5,6 +5,10 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: ${{ secrets.GCP_REGION }}
@@ -37,45 +41,31 @@ jobs:
 
       - name: Pytest
         env:
-          PYTHONPATH:
-        run: pytest -q
-       
-
-
+          PYTHONPATH: .
+        run: python -m pytest -q
 
   build_and_push:
     needs: ci_gates
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     outputs:
       image_uri: ${{ steps.meta.outputs.image_uri }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # ===== Auth: preferred WIF =====
       - name: Auth to Google (WIF)
-        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' }}
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-
-      # ===== Auth: fallback SA key =====
-      - name: Auth to Google (SA Key JSON)
-        if: ${{ secrets.GCP_SA_KEY_JSON != '' && secrets.GCP_WORKLOAD_IDENTITY_PROVIDER == '' }}
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Configure Docker auth for Artifact Registry
-        run: |
-          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
       - name: Build + Push Docker image
         id: meta
@@ -83,102 +73,71 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${IMAGE_NAME}:${SHORT_SHA}"
           echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
-
-          docker build -t "${IMAGE_URI}" .
+          docker build -f Dockerfile.api -t "${IMAGE_URI}" .
           docker push "${IMAGE_URI}"
 
   deploy_staging:
+    needs: build_and_push
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: build_and_push
-    environment: staging
-
     outputs:
-      staging_url: ${{ steps.deploy.outputs.staging_url }}
-
+      staging_url: ${{ steps.out.outputs.staging_url }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Auth to Google (WIF)
-        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' }}
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-
-      - name: Auth to Google (SA Key JSON)
-        if: ${{ secrets.GCP_SA_KEY_JSON != '' && secrets.GCP_WORKLOAD_IDENTITY_PROVIDER == '' }}
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Deploy to Cloud Run (staging)
-        id: deploy
         run: |
-          SERVICE="${{ secrets.CLOUD_RUN_STAGING_SERVICE }}"
-          IMAGE_URI="${{ needs.build_and_push.outputs.image_uri }}"
-
-          gcloud run deploy "${SERVICE}" \
-            --image "${IMAGE_URI}" \
+          gcloud run deploy "${{ secrets.CLOUD_RUN_STAGING_SERVICE }}" \
+            --image "${{ needs.build_and_push.outputs.image_uri }}" \
             --region "${REGION}" \
             --project "${PROJECT_ID}" \
-            --allow-unauthenticated
+            --allow-unauthenticated \
+            --port 8080
 
-          STAGING_URL="$(gcloud run services describe "${SERVICE}" --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.url)')"
+      - name: Output staging URL
+        id: out
+        run: |
+          STAGING_URL="$(gcloud run services describe "${{ secrets.CLOUD_RUN_STAGING_SERVICE }}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.url)')"
           echo "staging_url=${STAGING_URL}" >> "$GITHUB_OUTPUT"
           echo "Staging URL: ${STAGING_URL}"
 
-      - name: Smoke test staging (/health)
+      - name: Smoke test staging
         run: |
-          URL="${{ steps.deploy.outputs.staging_url }}"
-          echo "Testing ${URL}/health"
-          for i in {1..30}; do
-            if curl -fsS "${URL}/health" > /dev/null; then
-              echo "OK"
-              break
-            fi
-            sleep 2
-          done
+          URL="${{ steps.out.outputs.staging_url }}"
           curl -fsS "${URL}/health"
 
   promote_prod:
+    needs: deploy_staging
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [build_and_push, deploy_staging]
     environment: prod
-
     steps:
       - name: Auth to Google (WIF)
-        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' }}
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-
-      - name: Auth to Google (SA Key JSON)
-        if: ${{ secrets.GCP_SA_KEY_JSON != '' && secrets.GCP_WORKLOAD_IDENTITY_PROVIDER == '' }}
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY_JSON }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Deploy to Cloud Run (prod)
         run: |
-          SERVICE="${{ secrets.CLOUD_RUN_PROD_SERVICE }}"
-          IMAGE_URI="${{ needs.build_and_push.outputs.image_uri }}"
-
-          gcloud run deploy "${SERVICE}" \
-            --image "${IMAGE_URI}" \
+          gcloud run deploy "${{ secrets.CLOUD_RUN_PROD_SERVICE }}" \
+            --image "${{ needs.build_and_push.outputs.image_uri }}" \
             --region "${REGION}" \
             --project "${PROJECT_ID}" \
-            --allow-unauthenticated
-
-          PROD_URL="$(gcloud run services describe "${SERVICE}" --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.url)')"
-          echo "Prod URL: ${PROD_URL}"
-          curl -fsS "${PROD_URL}/health"
+            --allow-unauthenticated \
+            --port 8080
