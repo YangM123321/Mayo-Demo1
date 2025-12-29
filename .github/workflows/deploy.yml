@@ -92,7 +92,6 @@ jobs:
           docker build -f Dockerfile.api -t "${IMAGE_URI}" .
           docker push "${IMAGE_URI}"
 
-
       - name: Debug: confirm output visible to job
         shell: bash
         env:
