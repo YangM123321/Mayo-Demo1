@@ -16,9 +16,9 @@ from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.requests import Request
 
-from src.contracts.predictions import AdmitReq, AdmitResp
 from src.bootstrap.artifacts import ArtifactError, bootstrap_stage5
 from src.bootstrap.manifest import bootstrap_from_manifest
+from src.contracts.predictions import AdmitReq, AdmitResp
 
 print("[BOOT] importing src.service", file=sys.stderr, flush=True)
 
