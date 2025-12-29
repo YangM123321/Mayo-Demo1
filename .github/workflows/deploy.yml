@@ -12,7 +12,7 @@ permissions:
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: ${{ secrets.GCP_REGION }}
-  AR_REPO: ${{ secrets.AR_REPO }}
+  AR_REPO: ${{ secrets.GAR_REPO }}
   IMAGE_NAME: mayo-api
 
 jobs:
