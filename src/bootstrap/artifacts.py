@@ -11,7 +11,6 @@ from typing import Optional, Tuple
 import yaml
 from google.cloud import storage
 
-
 # Cloud Run writable area. (Also works locally.)
 ARTIFACT_ROOT = pathlib.Path(os.getenv("ARTIFACT_DIR", "/tmp/artifacts")).resolve()
 
@@ -99,9 +98,7 @@ def download_from_gcs(spec: DownloadSpec, *, force: bool = False) -> pathlib.Pat
 
         actual_size = tmp_path.stat().st_size
         if actual_size < spec.min_bytes:
-            raise ArtifactError(
-                f"Downloaded file too small: {tmp_path} ({actual_size} bytes)"
-            )
+            raise ArtifactError(f"Downloaded file too small: {tmp_path} ({actual_size} bytes)")
 
         if spec.expected_sha256:
             actual_sha = _sha256_file(tmp_path)
@@ -153,8 +150,8 @@ def bootstrap_stage5() -> dict:
 
     # Optional integrity envs:
     features_sha = os.getenv("FEATURES_SHA256")  # optional
-    model_sha = os.getenv("MODEL_SHA256")        # optional
-    config_sha = os.getenv("CONFIG_SHA256")      # optional
+    model_sha = os.getenv("MODEL_SHA256")  # optional
+    config_sha = os.getenv("CONFIG_SHA256")  # optional
 
     features_path = download_from_gcs(
         DownloadSpec(

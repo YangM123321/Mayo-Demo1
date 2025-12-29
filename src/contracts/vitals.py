@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+
 class VitalEvent(BaseModel):
     patient_id: str
     encounter_id: str

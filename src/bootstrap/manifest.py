@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Dict
 
-from src.bootstrap.artifacts import ArtifactError, download_from_gcs, DownloadSpec, load_config
+from src.bootstrap.artifacts import ArtifactError, DownloadSpec, download_from_gcs, load_config
 
 
 def bootstrap_from_manifest() -> Dict:
@@ -31,7 +31,7 @@ def bootstrap_from_manifest() -> Dict:
     model_path = download_from_gcs(
         DownloadSpec(
             uri=m_model["uri"],
-            dest_rel="model/admit_lr.joblib",   # match your real file type
+            dest_rel="model/admit_lr.joblib",  # match your real file type
             min_bytes=int(m_model.get("min_bytes", 1)),
             expected_sha256=m_model.get("sha256"),
         )
