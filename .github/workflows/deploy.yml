@@ -92,10 +92,15 @@ jobs:
           docker build -f Dockerfile.api -t "${IMAGE_URI}" .
           docker push "${IMAGE_URI}"
 
+
       - name: Debug: confirm output visible to job
         shell: bash
+        env:
+          IMAGE_URI: ${{ steps.meta.outputs.image_uri }}
         run: |
-          echo "steps.meta.outputs.image_uri = ${{ steps.meta.outputs.image_uri }}"
+          set -euo pipefail
+          echo "steps.meta.outputs.image_uri = ${IMAGE_URI}"
+          test -n "${IMAGE_URI}" || (echo "ERROR: image_uri is empty" && exit 1)
 
 
   deploy_staging:
