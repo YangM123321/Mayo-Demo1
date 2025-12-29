@@ -19,8 +19,9 @@ def test_vitals_valid():
 
 
 def test_vitals_invalid():
-    assert 1 == 2
     with pytest.raises(ValidationError):
+
         VitalEvent(patient_id="p1", encounter_id="e1", timestamp="badtime", heart_rate="oops")
+        assert 1 == 2
 
 
