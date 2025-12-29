@@ -44,6 +44,8 @@ jobs:
           PYTHONPATH: .
         run: pytest -q
 
+         
+          
   build_and_push:
     needs: ci_gates
     runs-on: ubuntu-latest
@@ -70,19 +72,30 @@ jobs:
         run: |
           gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
 
-      - name: Build + Push Docker image
+      - name: Compute image URI
         id: meta
         shell: bash
         run: |
           set -euo pipefail
           SHORT_SHA="${GITHUB_SHA::7}"
           IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPO }}/${{ env.IMAGE_NAME }}:${SHORT_SHA}"
-
-          echo "Built image: ${IMAGE_URI}"
           echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+          echo "Computed image_uri=${IMAGE_URI}"
 
+      - name: Build + Push Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_URI="${{ steps.meta.outputs.image_uri }}"
+          echo "Building ${IMAGE_URI}"
           docker build -f Dockerfile.api -t "${IMAGE_URI}" .
           docker push "${IMAGE_URI}"
+
+      - name: Debug: confirm output visible to job
+        shell: bash
+        run: |
+          echo "steps.meta.outputs.image_uri = ${{ steps.meta.outputs.image_uri }}"
+
 
   deploy_staging:
     needs: build_and_push
