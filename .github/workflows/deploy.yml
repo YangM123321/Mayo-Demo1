@@ -52,7 +52,7 @@ jobs:
     timeout-minutes: 20
 
     outputs:
-      image_uri: "${{ steps.meta.outputs.image_uri }}"
+      image_uri: ${{ steps.jobout.outputs.image_uri }}
 
     steps:
       - uses: actions/checkout@v4
@@ -60,40 +60,46 @@ jobs:
       - name: Auth to Google (WIF)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: "${{ secrets.WIF_PROVIDER }}"
-          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Configure Docker auth for Artifact Registry
         shell: bash
         run: |
           set -euo pipefail
-          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
 
-      - name: Compute image URI
+      - name: Compute image URI (save to env)
         id: meta
         shell: bash
         run: |
           set -euo pipefail
           SHORT_SHA="${GITHUB_SHA::7}"
-          IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPO}/${IMAGE_NAME}:${SHORT_SHA}"
-          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
-          echo "Computed image_uri=${IMAGE_URI}"
+          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPO }}/${{ env.IMAGE_NAME }}:${SHORT_SHA}"
+          echo "IMAGE_URI=${IMAGE_URI}" >> "$GITHUB_ENV"
+          echo "Computed IMAGE_URI=${IMAGE_URI}"
 
       - name: Build + Push Docker image
         shell: bash
         run: |
           set -euo pipefail
-          IMAGE_URI="${{ steps.meta.outputs.image_uri }}"
-          test -n "$IMAGE_URI" || (echo "ERROR: image_uri empty" && exit 1)
-
-          echo "Building ${IMAGE_URI}"
+          test -n "${IMAGE_URI}" || (echo "ERROR: IMAGE_URI empty" && exit 1)
           docker build -f Dockerfile.api -t "${IMAGE_URI}" .
           docker push "${IMAGE_URI}"
+
+      - name: Export job output image_uri (FINAL)
+        id: jobout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${IMAGE_URI}" || (echo "ERROR: IMAGE_URI empty at export" && exit 1)
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+          echo "Exported job output image_uri=${IMAGE_URI}"
 
   deploy_staging:
     needs: build_and_push
