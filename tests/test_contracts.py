@@ -6,6 +6,8 @@ from src.contracts.vitals import VitalEvent  # adjust to your class name
 
 def test_admit_req_valid():
     AdmitReq(patient_id="p1", encounter_id="e1")
+    
+
 
 
 def test_admit_req_invalid():
@@ -17,6 +19,7 @@ def test_vitals_valid():
 
 
 def test_vitals_invalid():
+    assert 1 == 2
     with pytest.raises(ValidationError):
         VitalEvent(patient_id="p1", encounter_id="e1", timestamp="badtime", heart_rate="oops")
 
