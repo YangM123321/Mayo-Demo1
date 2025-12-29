@@ -12,10 +12,8 @@ permissions:
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: ${{ secrets.GCP_REGION }}
-  AR_REPO: ${{ secrets.GAR_REPO }}
+  GAR_REPO: ${{ secrets.GAR_REPO }}
   IMAGE_NAME: mayo-api
-
-
 
 jobs:
   ci_gates:
@@ -44,14 +42,16 @@ jobs:
       - name: Pytest
         env:
           PYTHONPATH: .
-        run: python -m pytest -q
+        run: pytest -q
 
   build_and_push:
     needs: ci_gates
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
     outputs:
       image_uri: ${{ steps.meta.outputs.image_uri }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -67,14 +67,20 @@ jobs:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Configure Docker auth for Artifact Registry
-        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+        run: |
+          gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
 
       - name: Build + Push Docker image
         id: meta
+        shell: bash
         run: |
+          set -euo pipefail
           SHORT_SHA="${GITHUB_SHA::7}"
-          IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${IMAGE_NAME}:${SHORT_SHA}"
+          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPO }}/${{ env.IMAGE_NAME }}:${SHORT_SHA}"
+
+          echo "Built image: ${IMAGE_URI}"
           echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+
           docker build -f Dockerfile.api -t "${IMAGE_URI}" .
           docker push "${IMAGE_URI}"
 
@@ -82,8 +88,10 @@ jobs:
     needs: build_and_push
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
     outputs:
       staging_url: ${{ steps.out.outputs.staging_url }}
+
     steps:
       - name: Auth to Google (WIF)
         uses: google-github-actions/auth@v2
@@ -96,33 +104,44 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
+      - name: Debug deploy inputs
+        shell: bash
+        run: |
+          echo "SERVICE=${{ secrets.CLOUD_RUN_STAGING_SERVICE }}"
+          echo "IMAGE=${{ needs.build_and_push.outputs.image_uri }}"
+          test -n "${{ secrets.CLOUD_RUN_STAGING_SERVICE }}" || (echo "Missing CLOUD_RUN_STAGING_SERVICE" && exit 1)
+          test -n "${{ needs.build_and_push.outputs.image_uri }}" || (echo "Missing image_uri output" && exit 1)
+
       - name: Deploy to Cloud Run (staging)
+        shell: bash
         run: |
           gcloud run deploy "${{ secrets.CLOUD_RUN_STAGING_SERVICE }}" \
             --image "${{ needs.build_and_push.outputs.image_uri }}" \
-            --region "${REGION}" \
-            --project "${PROJECT_ID}" \
+            --region "${{ env.REGION }}" \
+            --project "${{ env.PROJECT_ID }}" \
             --allow-unauthenticated \
             --port 8080
 
       - name: Output staging URL
         id: out
+        shell: bash
         run: |
           STAGING_URL="$(gcloud run services describe "${{ secrets.CLOUD_RUN_STAGING_SERVICE }}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.url)')"
+            --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}" --format='value(status.url)')"
           echo "staging_url=${STAGING_URL}" >> "$GITHUB_OUTPUT"
           echo "Staging URL: ${STAGING_URL}"
 
       - name: Smoke test staging
+        shell: bash
         run: |
-          URL="${{ steps.out.outputs.staging_url }}"
-          curl -fsS "${URL}/health"
+          curl -fsS "${{ steps.out.outputs.staging_url }}/health"
 
   promote_prod:
     needs: deploy_staging
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: prod
+
     steps:
       - name: Auth to Google (WIF)
         uses: google-github-actions/auth@v2
@@ -136,10 +155,11 @@ jobs:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Deploy to Cloud Run (prod)
+        shell: bash
         run: |
           gcloud run deploy "${{ secrets.CLOUD_RUN_PROD_SERVICE }}" \
             --image "${{ needs.build_and_push.outputs.image_uri }}" \
-            --region "${REGION}" \
-            --project "${PROJECT_ID}" \
+            --region "${{ env.REGION }}" \
+            --project "${{ env.PROJECT_ID }}" \
             --allow-unauthenticated \
             --port 8080
