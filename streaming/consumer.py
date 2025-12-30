@@ -1,9 +1,6 @@
-
-
-##########################
+# src/streaming/consumer.py
 from __future__ import annotations
 
-import json
 import logging
 import os
 from typing import Callable
@@ -21,14 +18,15 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
 
 def _consumer(conf: KafkaConfig) -> Consumer:
-    cconf = {
-        "bootstrap.servers": conf.bootstrap_servers,
-        "group.id": conf.group_id,
-        "auto.offset.reset": "earliest",
-        "enable.auto.commit": False,  # ✅ manual commit only after success
-        "max.poll.interval.ms": 600000,
-    }
-    return Consumer(cconf)
+    return Consumer(
+        {
+            "bootstrap.servers": conf.bootstrap_servers,
+            "group.id": conf.group_id,
+            "auto.offset.reset": "earliest",
+            "enable.auto.commit": False,  # commit only after success
+            "max.poll.interval.ms": 600000,
+        }
+    )
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=0.5, min=0.5, max=8))
@@ -54,21 +52,21 @@ def run_forever(handler: Callable[[VitalEvent], None]) -> None:
 
             raw = msg.value().decode("utf-8", errors="replace")
 
-            # ✅ schema validation
+            # schema validation
             try:
                 evt = VitalEvent.parse_json(raw)
             except Exception as e:
                 publish_dlq(conf, raw=raw, reason=str(e), extra={"stage": "schema"})
-                c.commit(message=msg, asynchronous=False)  # commit to avoid poison-pill loop
+                c.commit(message=msg, asynchronous=False)
                 continue
 
-            # ✅ idempotency
+            # idempotency
             if seen(evt.meta.event_id):
                 logger.info("duplicate_event_skip", extra={"event_id": evt.meta.event_id})
                 c.commit(message=msg, asynchronous=False)
                 continue
 
-            # ✅ processing with retries; if still fails -> DLQ
+            # process with retry; on failure -> DLQ
             try:
                 _process_with_retry(handler, evt)
                 mark_seen(evt.meta.event_id)
@@ -81,6 +79,5 @@ def run_forever(handler: Callable[[VitalEvent], None]) -> None:
                     extra={"stage": "processing", "event_id": evt.meta.event_id},
                 )
                 c.commit(message=msg, asynchronous=False)
-
     finally:
         c.close()

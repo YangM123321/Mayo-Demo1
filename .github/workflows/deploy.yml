@@ -90,7 +90,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export KAFKA_BOOTSTRAP_SERVERS="localhost:19092"
+          export KAFKA_TOPIC_IN="vitals.in"
+          export KAFKA_TOPIC_DLQ="vitals.dlq"
+          export KAFKA_GROUP_ID="ci-consumer"
+          export IDEMPOTENCY_DB="/tmp/seen_events_ci.db"
           ./scripts/streaming_smoke_test.sh
+
 
       - name: Tear down Kafka (Redpanda)
         if: always()
