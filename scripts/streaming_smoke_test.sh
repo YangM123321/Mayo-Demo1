@@ -4,112 +4,107 @@ set -euo pipefail
 export KAFKA_BOOTSTRAP_SERVERS="localhost:9092"
 export KAFKA_TOPIC_IN="vitals.in"
 export KAFKA_TOPIC_DLQ="vitals.dlq"
-
 export KAFKA_GROUP_ID="ci-consumer-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
-
-
 export IDEMPOTENCY_DB="/tmp/seen_events_ci.db"
 export VITALS_AUDIT_PATH="/tmp/vitals_audit.log"
 
-rm -f /tmp/vitals_audit.log /tmp/seen_events_ci.db || true
+rm -f /tmp/vitals_audit.log /tmp/seen_events_ci.db /tmp/consumer.log || true
 
 fail() {
   echo "❌ streaming smoke test failed"
-  echo "---- docker compose ps ----"
-  docker compose -f docker-compose.kafka.yml ps || true
+  echo "---- consumer log (tail) ----"
+  tail -n 200 /tmp/consumer.log 2>/dev/null || true
   echo "---- redpanda logs ----"
   docker compose -f docker-compose.kafka.yml logs --no-color redpanda || true
-  echo "---- consumer alive? ----"
-  if kill -0 "${CONS_PID:-0}" 2>/dev/null; then
-    echo "consumer still running (pid=$CONS_PID)"
-  else
-    echo "consumer NOT running"
-  fi
-  echo "---- audit file (if any) ----"
+  echo "---- audit file ----"
   ls -l /tmp/vitals_audit.log || true
   tail -n 50 /tmp/vitals_audit.log 2>/dev/null || true
   exit 1
 }
 
-# Wait for broker
+# Wait for broker (metadata, no produce)
 python - <<'PY'
 import os, time
-from confluent_kafka import Producer
+from confluent_kafka.admin import AdminClient
 
-p = Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
+bs = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
+a = AdminClient({"bootstrap.servers": bs})
 for i in range(60):
     try:
-        p.produce(os.environ.get("KAFKA_TOPIC_IN","vitals.in"), b"{}")
-        p.flush(2)
-        print("broker_ready")
-        raise SystemExit(0)
+        md = a.list_topics(timeout=2)
+        if md.brokers:
+            print("broker_ready")
+            raise SystemExit(0)
     except Exception:
         time.sleep(1)
 raise SystemExit("broker_not_ready")
 PY
 
-# start consumer in background
-python -m src.streaming.main &
+# Start consumer in background (capture logs!)
+python -m src.streaming.main > /tmp/consumer.log 2>&1 &
 CONS_PID=$!
 sleep 2
 
-# send valid event
-
+# Send "valid" event (CURRENTLY your best guess)
 python - <<'PY'
 import os, json, time
 from datetime import datetime, timezone
 from confluent_kafka import Producer
 
-p = Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
+bs = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
 topic = os.environ["KAFKA_TOPIC_IN"]
 
-def send():
-    evt = {
-      "meta":{"event_id":"ci-evt-1","schema":"vitals.v1","schema_version":1,"produced_at":datetime.now(timezone.utc).isoformat()},
-      "patient_id":"p1",
-      "encounter_id":"e1",
-      "timestamp":datetime.now(timezone.utc).isoformat(),
-      "heart_rate":80
-    }
-    p.produce(topic, json.dumps(evt).encode("utf-8"))
-    p.flush(5)
+p = Producer({"bootstrap.servers": bs})
 
-# send once, wait, send again (helps if consumer not ready yet)
-send()
-time.sleep(2)
-send()
+evt = {
+  "meta": {
+    "event_id": "ci-evt-1",
+    "schema": "vitals.v1",
+    "schema_version": 1,
+    "produced_at": datetime.now(timezone.utc).isoformat(),
+  },
+  "patient_id": "p1",
+  "encounter_id": "e1",
+  "timestamp": datetime.now(timezone.utc).isoformat(),
+  "heart_rate": 80,
+}
+
+p.produce(topic, json.dumps(evt).encode("utf-8"))
+p.flush(10)
+
+# send twice in case consumer is still joining
+time.sleep(1)
+p.produce(topic, json.dumps(evt).encode("utf-8"))
+p.flush(10)
 PY
 
-# send invalid event
+# Send invalid event (should go to DLQ)
 python - <<'PY'
 import os
 from confluent_kafka import Producer
 
-p = Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
+bs = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
 topic = os.environ["KAFKA_TOPIC_IN"]
+p = Producer({"bootstrap.servers": bs})
 p.produce(topic, b'{"bad":"payload"}')
-p.flush(5)
+p.flush(10)
 PY
 
-
-# wait up to 30s for consumer to write audit
+# Wait up to 30s for audit record; if missing, print logs
 for i in {1..30}; do
   if test -f /tmp/vitals_audit.log && grep -q '"event_id": "ci-evt-1"' /tmp/vitals_audit.log; then
     echo "✅ audit record found"
     break
   fi
-  # if consumer died, fail fast with diagnostics
   if ! kill -0 "$CONS_PID" 2>/dev/null; then
     fail
   fi
   sleep 1
 done
 
-# final assertion (and diagnostics if missing)
 test -f /tmp/vitals_audit.log || fail
 grep -q '"event_id": "ci-evt-1"' /tmp/vitals_audit.log || fail
 
-# stop consumer
 kill "$CONS_PID" 2>/dev/null || true
 sleep 1
 
