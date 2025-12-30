@@ -1,5 +1,3 @@
-
-
 #!/bin/sh
 set -eu
 
@@ -12,9 +10,7 @@ if [ "$MODE" = "api" ]; then
   exec uvicorn src.service:app --host 0.0.0.0 --port "$PORT"
 elif [ "$MODE" = "mlflow" ]; then
   exec uvicorn src.app_mlflow:app --host 0.0.0.0 --port "$PORT"
-  #exec uvicorn src.service:app --host 0.0.0.0 --port "${PORT:-8080}"
-
 else
-  echo "Unknown MODE=$MODE" >&2
+  echo "Unknown MODE=$MODE"
   exit 2
 fi

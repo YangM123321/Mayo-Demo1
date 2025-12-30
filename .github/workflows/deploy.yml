@@ -15,7 +15,10 @@ env:
   GAR_REPO: ${{ secrets.GAR_REPO }}
   IMAGE_NAME: mayo-api
 
-  # Artifact URIs (these become Cloud Run env vars via --set-env-vars)
+  # Preferred: single manifest drives Stage 5 downloads inside the container
+  ARTIFACT_MANIFEST_URI: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/manifest.yaml
+
+  # Keep these too (your service may still reference them)
   FEATURES_URI: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/features_matrix.parquet
   MODEL_URI: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/admit_lr.joblib
   FEATURE_LIST_URI: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/feature_list.json
@@ -128,7 +131,8 @@ jobs:
             --project "${PROJECT_ID}" \
             --allow-unauthenticated \
             --port 8080 \
-            --set-env-vars "PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},MODEL_MIN_BYTES=${MODEL_MIN_BYTES},FEATURES_URI=${FEATURES_URI},MODEL_URI=${MODEL_URI},FEATURE_LIST_URI=${FEATURE_LIST_URI}"
+            --timeout 900 \
+            --set-env-vars "MODE=api,PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},MODEL_MIN_BYTES=${MODEL_MIN_BYTES},ARTIFACT_MANIFEST_URI=${ARTIFACT_MANIFEST_URI},FEATURES_URI=${FEATURES_URI},MODEL_URI=${MODEL_URI},FEATURE_LIST_URI=${FEATURE_LIST_URI}"
 
       - name: Output staging URL
         id: out
@@ -182,9 +186,10 @@ jobs:
             --project "${PROJECT_ID}" \
             --allow-unauthenticated \
             --port 8080 \
-            --set-env-vars "PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},MODEL_MIN_BYTES=${MODEL_MIN_BYTES},FEATURES_URI=${FEATURES_URI},MODEL_URI=${MODEL_URI},FEATURE_LIST_URI=${FEATURE_LIST_URI}"
+            --timeout 900 \
+            --set-env-vars "MODE=api,PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},MODEL_MIN_BYTES=${MODEL_MIN_BYTES},ARTIFACT_MANIFEST_URI=${ARTIFACT_MANIFEST_URI},FEATURES_URI=${FEATURES_URI},MODEL_URI=${MODEL_URI},FEATURE_LIST_URI=${FEATURE_LIST_URI}"
 
-      - name: Output prod URL
+      - name: Output prod URL + smoke test
         shell: bash
         run: |
           set -euo pipefail
