@@ -1,4 +1,3 @@
-# src/streaming/consumer.py
 from __future__ import annotations
 
 import logging
@@ -66,7 +65,7 @@ def run_forever(handler: Callable[[VitalEvent], None]) -> None:
                 c.commit(message=msg, asynchronous=False)
                 continue
 
-            # process with retry; on failure -> DLQ
+            # processing + retries
             try:
                 _process_with_retry(handler, evt)
                 mark_seen(evt.meta.event_id)

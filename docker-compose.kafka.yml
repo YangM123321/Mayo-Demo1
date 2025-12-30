@@ -13,3 +13,4 @@ services:
       --advertise-kafka-addr PLAINTEXT://redpanda:9092
     ports:
       - "9092:9092"
+      - "9644:9644"

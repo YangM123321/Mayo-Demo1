@@ -76,25 +76,33 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # REQUIRED if you import "from kafka import ..."
+          pip install kafka-python
 
       - name: Start Kafka (Redpanda)
         shell: bash
         run: |
           set -euo pipefail
           docker compose -f docker-compose.kafka.yml up -d
-          # wait a bit for broker
-          sleep 10
           docker compose -f docker-compose.kafka.yml ps
 
-
-
-      - name: Run streaming smoke test
+      - name: Wait for broker (localhost:9092)
         shell: bash
         run: |
           set -euo pipefail
+          for i in {1..60}; do
+            (echo > /dev/tcp/127.0.0.1/9092) >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "Kafka port not ready" && docker compose -f docker-compose.kafka.yml logs && exit 1
+
+      - name: Run streaming smoke test
+        shell: bash
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+        run: |
+          set -euo pipefail
           bash scripts/streaming_smoke_test.sh
-
-
 
       - name: Tear down Kafka (Redpanda)
         if: always()
@@ -102,6 +110,7 @@ jobs:
         run: |
           set -euo pipefail
           docker compose -f docker-compose.kafka.yml down -v
+
 
   build_and_push:
     needs: [ci_gates, streaming_smoke]
