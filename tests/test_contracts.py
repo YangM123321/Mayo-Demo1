@@ -8,8 +8,6 @@ def test_admit_req_valid():
     AdmitReq(patient_id="p1", encounter_id="e1")
     
 
-
-
 def test_admit_req_invalid():
     with pytest.raises(ValidationError):
         AdmitReq(patient_id="p1")  # missing encounter_id
@@ -19,11 +17,9 @@ def test_vitals_valid():
     
 
 
-
 def test_vitals_invalid():
     with pytest.raises(ValidationError):
         
-
 
         VitalEvent(patient_id="p1", encounter_id="e1", timestamp="badtime", heart_rate="oops")
        
