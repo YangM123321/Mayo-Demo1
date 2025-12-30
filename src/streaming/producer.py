@@ -11,11 +11,7 @@ from datetime import datetime, timezone
 
 from confluent_kafka import Producer
 
-BOOTSTRAP = (
-    os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-    or os.getenv("KAFKA_BROKER")
-    or "localhost:9092"
-)
+BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS") or os.getenv("KAFKA_BROKER") or "localhost:9092"
 TOPIC = os.getenv("KAFKA_TOPIC", "vitals.in")
 
 p = Producer({"bootstrap.servers": BOOTSTRAP})
@@ -32,9 +28,11 @@ def msg():
         "BP_DIA": random.randint(55, 105),
     }
 
+
 def delivered(err, rec):
     if err:
         print("❌ delivery failed:", err, file=sys.stderr)
+
 
 try:
     while True:
@@ -45,4 +43,3 @@ except KeyboardInterrupt:
     pass
 finally:
     p.flush(5)
-
