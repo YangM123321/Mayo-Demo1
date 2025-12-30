@@ -9,14 +9,12 @@ export IDEMPOTENCY_DB="/tmp/seen_events_ci.db"
 export VITALS_AUDIT_PATH="/tmp/vitals_audit.log"
 
 rm -f /tmp/vitals_audit.log /tmp/seen_events_ci.db || true
-import os
-
-
 
 # Wait for broker
 python - <<'PY'
-import time
+import os, time
 from confluent_kafka import Producer
+
 p = Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
 for i in range(30):
     try:
@@ -36,11 +34,12 @@ sleep 2
 
 # send valid event
 python - <<'PY'
-import json
+import os, json
 from datetime import datetime, timezone
 from confluent_kafka import Producer
-p=Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
-evt={
+
+p = Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
+evt = {
   "meta":{"event_id":"ci-evt-1","schema":"vitals.v1","schema_version":1,"produced_at":datetime.now(timezone.utc).isoformat()},
   "patient_id":"p1",
   "encounter_id":"e1",
@@ -53,8 +52,10 @@ PY
 
 # send invalid event
 python - <<'PY'
+import os
 from confluent_kafka import Producer
-p=Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
+
+p = Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
 p.produce("vitals.in", b'{"bad":"payload"}')
 p.flush(5)
 PY
