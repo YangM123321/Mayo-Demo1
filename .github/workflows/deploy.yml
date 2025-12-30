@@ -15,6 +15,12 @@ env:
   GAR_REPO: ${{ secrets.GAR_REPO }}
   IMAGE_NAME: mayo-api
 
+  # Artifact URIs (these become Cloud Run env vars via --set-env-vars)
+  FEATURES_URI: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/features_matrix.parquet
+  MODEL_URI: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/admit_lr.joblib
+  FEATURE_LIST_URI: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/feature_list.json
+  MODEL_MIN_BYTES: "100"
+
 jobs:
   ci_gates:
     runs-on: ubuntu-latest
@@ -50,7 +56,6 @@ jobs:
     needs: ci_gates
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
       - uses: actions/checkout@v4
 
@@ -92,7 +97,6 @@ jobs:
     needs: build_and_push
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
       - name: Auth to Google (WIF)
         uses: google-github-actions/auth@v2
@@ -114,15 +118,6 @@ jobs:
           echo "IMAGE_URI=${IMAGE_URI}" >> "$GITHUB_ENV"
           echo "Computed IMAGE_URI=${IMAGE_URI}"
 
-      - name: Verify deploy inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "SERVICE=${{ secrets.CLOUD_RUN_STAGING_SERVICE }}"
-          echo "IMAGE=${IMAGE_URI}"
-          test -n "${{ secrets.CLOUD_RUN_STAGING_SERVICE }}" || (echo "Missing CLOUD_RUN_STAGING_SERVICE" && exit 1)
-          test -n "${IMAGE_URI}" || (echo "Missing IMAGE_URI" && exit 1)
-
       - name: Deploy to Cloud Run (staging)
         shell: bash
         run: |
@@ -132,7 +127,8 @@ jobs:
             --region "${REGION}" \
             --project "${PROJECT_ID}" \
             --allow-unauthenticated \
-            --port 8080
+            --port 8080 \
+            --set-env-vars "PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},MODEL_MIN_BYTES=${MODEL_MIN_BYTES},FEATURES_URI=${FEATURES_URI},MODEL_URI=${MODEL_URI},FEATURE_LIST_URI=${FEATURE_LIST_URI}"
 
       - name: Output staging URL
         id: out
@@ -155,7 +151,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: prod
-
     steps:
       - name: Auth to Google (WIF)
         uses: google-github-actions/auth@v2
@@ -186,7 +181,8 @@ jobs:
             --region "${REGION}" \
             --project "${PROJECT_ID}" \
             --allow-unauthenticated \
-            --port 8080
+            --port 8080 \
+            --set-env-vars "PROJECT_ID=${PROJECT_ID},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},MODEL_MIN_BYTES=${MODEL_MIN_BYTES},FEATURES_URI=${FEATURES_URI},MODEL_URI=${MODEL_URI},FEATURE_LIST_URI=${FEATURE_LIST_URI}"
 
       - name: Output prod URL
         shell: bash
