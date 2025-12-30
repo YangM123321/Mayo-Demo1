@@ -123,7 +123,8 @@ async def lifespan(app: FastAPI):
     # 1) feature_list_path set by bootstrap
     # 2) fallback env FEATURE_LIST_PATH
     feature_list_path = _fix_legacy_path(
-        _as_path(app.state.bootstrap.get("feature_list_path")) or _as_path(os.getenv("FEATURE_LIST_PATH"))
+        _as_path(app.state.bootstrap.get("feature_list_path"))
+        or _as_path(os.getenv("FEATURE_LIST_PATH"))
     )
 
     # Validate "present" (not existence yet)

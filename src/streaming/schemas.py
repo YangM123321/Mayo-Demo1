@@ -30,4 +30,6 @@ class VitalEvent(BaseModel):
             return cls.model_validate_json(raw)
         except ValidationError as e:
             # keep error text short for logs/DLQ
-            raise ValueError(f"schema_validation_failed: {e.errors()[0].get('msg', 'invalid')}") from e
+            raise ValueError(
+                f"schema_validation_failed: {e.errors()[0].get('msg', 'invalid')}"
+            ) from e

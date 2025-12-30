@@ -20,7 +20,9 @@ def _producer(conf: KafkaConfig) -> Producer:
     return Producer(pconf)
 
 
-def publish_dlq(conf: KafkaConfig, *, raw: str, reason: str, extra: Dict[str, Any] | None = None) -> None:
+def publish_dlq(
+    conf: KafkaConfig, *, raw: str, reason: str, extra: Dict[str, Any] | None = None
+) -> None:
     payload = {
         "raw": raw,
         "reason": reason,
