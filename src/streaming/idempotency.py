@@ -5,7 +5,6 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-
 DB_PATH = Path(os.getenv("IDEMPOTENCY_DB", "/tmp/seen_events.db"))
 
 

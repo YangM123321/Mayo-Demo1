@@ -11,7 +11,6 @@ from typing import Optional, Tuple
 import yaml
 from google.cloud import storage
 
-
 # Cloud Run writable area. (Also works locally.)
 ARTIFACT_ROOT = pathlib.Path(os.getenv("ARTIFACT_DIR", "/tmp/artifacts")).resolve()
 
@@ -147,8 +146,8 @@ def bootstrap_stage5() -> dict:
     config_uri = os.getenv("CONFIG_URI")
 
     # NEW: feature list can be provided as either a local path OR a GCS URI.
-    feature_list_path_env = os.getenv("FEATURE_LIST_PATH")   # local path (legacy)
-    feature_list_uri = os.getenv("FEATURE_LIST_URI")         # gs://.../feature_list.json (new)
+    feature_list_path_env = os.getenv("FEATURE_LIST_PATH")  # local path (legacy)
+    feature_list_uri = os.getenv("FEATURE_LIST_URI")  # gs://.../feature_list.json (new)
 
     if not features_uri:
         raise ArtifactError("FEATURES_URI is required")
@@ -157,8 +156,8 @@ def bootstrap_stage5() -> dict:
 
     # Optional integrity envs:
     features_sha = os.getenv("FEATURES_SHA256")  # optional
-    model_sha = os.getenv("MODEL_SHA256")        # optional
-    config_sha = os.getenv("CONFIG_SHA256")      # optional
+    model_sha = os.getenv("MODEL_SHA256")  # optional
+    config_sha = os.getenv("CONFIG_SHA256")  # optional
     feature_list_sha = os.getenv("FEATURE_LIST_SHA256")  # optional
 
     features_path = download_from_gcs(
@@ -225,5 +224,7 @@ def bootstrap_stage5() -> dict:
         "model_path": str(model_path),
         "config_path": str(config_path) if config_path else None,
         "config": config_obj,
-        "feature_list_path": str(resolved_feature_list_path) if resolved_feature_list_path else None,
+        "feature_list_path": str(resolved_feature_list_path)
+        if resolved_feature_list_path
+        else None,
     }
