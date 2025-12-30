@@ -1,6 +1,14 @@
 # streaming/producer.py
-import json, time, random, uuid, os, sys
+from __future__ import annotations
+
+import json
+import os
+import random
+import sys
+import time
+import uuid
 from datetime import datetime, timezone
+
 from confluent_kafka import Producer
 
 BOOTSTRAP = (
@@ -11,6 +19,9 @@ BOOTSTRAP = (
 TOPIC = os.getenv("KAFKA_TOPIC", "vitals.in")
 
 p = Producer({"bootstrap.servers": BOOTSTRAP})
+
+# ... rest unchanged
+
 
 def msg():
     return {
