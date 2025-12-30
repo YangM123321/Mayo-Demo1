@@ -4,7 +4,10 @@ set -euo pipefail
 export KAFKA_BOOTSTRAP_SERVERS="localhost:9092"
 export KAFKA_TOPIC_IN="vitals.in"
 export KAFKA_TOPIC_DLQ="vitals.dlq"
-export KAFKA_GROUP_ID="ci-consumer"
+
+export KAFKA_GROUP_ID="ci-consumer-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
+
+
 export IDEMPOTENCY_DB="/tmp/seen_events_ci.db"
 export VITALS_AUDIT_PATH="/tmp/vitals_audit.log"
 
@@ -51,22 +54,30 @@ CONS_PID=$!
 sleep 2
 
 # send valid event
+
 python - <<'PY'
-import os, json
+import os, json, time
 from datetime import datetime, timezone
 from confluent_kafka import Producer
 
 p = Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
-topic = os.environ.get("KAFKA_TOPIC_IN","vitals.in")
-evt = {
-  "meta":{"event_id":"ci-evt-1","schema":"vitals.v1","schema_version":1,"produced_at":datetime.now(timezone.utc).isoformat()},
-  "patient_id":"p1",
-  "encounter_id":"e1",
-  "timestamp":datetime.now(timezone.utc).isoformat(),
-  "heart_rate":80
-}
-p.produce(topic, json.dumps(evt).encode("utf-8"))
-p.flush(5)
+topic = os.environ["KAFKA_TOPIC_IN"]
+
+def send():
+    evt = {
+      "meta":{"event_id":"ci-evt-1","schema":"vitals.v1","schema_version":1,"produced_at":datetime.now(timezone.utc).isoformat()},
+      "patient_id":"p1",
+      "encounter_id":"e1",
+      "timestamp":datetime.now(timezone.utc).isoformat(),
+      "heart_rate":80
+    }
+    p.produce(topic, json.dumps(evt).encode("utf-8"))
+    p.flush(5)
+
+# send once, wait, send again (helps if consumer not ready yet)
+send()
+time.sleep(2)
+send()
 PY
 
 # send invalid event
@@ -75,10 +86,11 @@ import os
 from confluent_kafka import Producer
 
 p = Producer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"]})
-topic = os.environ.get("KAFKA_TOPIC_IN","vitals.in")
+topic = os.environ["KAFKA_TOPIC_IN"]
 p.produce(topic, b'{"bad":"payload"}')
 p.flush(5)
 PY
+
 
 # wait up to 30s for consumer to write audit
 for i in {1..30}; do
