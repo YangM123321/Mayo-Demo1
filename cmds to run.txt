@@ -678,6 +678,15 @@ Stage 7 is 100% successful if all of these are true:
 ✔️ Works from a fresh PowerShell session
 
 
+gcloud builds describe f5764cd3-2263-457f-ae1e-84d34ea821ae --project $PROJECT_ID --format="value(status,finishTime,logUrl)"
+
+gcloud run services describe $SERVICE --region $REGION --project $PROJECT_ID --format="value(status.url,status.latestReadyRevisionName)"
+
+$URL = gcloud run services describe $SERVICE --region $REGION --project $PROJECT_ID --format="value(status.url)"
+curl "$URL/health"
+
+
+
 
 8. Stage 8 = “Production demo polish” (observability + reliability + demo readiness). kafka 
 Kafka is Stage 8 only if your demo requires streaming, like:

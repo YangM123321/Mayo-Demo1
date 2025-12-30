@@ -32,6 +32,55 @@ def _as_path(x: Optional[str]) -> Optional[Path]:
     return Path(x) if x else None
 
 
+def _fix_legacy_path(p: Optional[Path]) -> Optional[Path]:
+    """
+    Old images used /app/out/*. New runtime uses /tmp/artifacts/**.
+    If bootstrap returns a legacy path, try to map it to the new layout.
+    """
+    if not p:
+        return None
+
+    # If it exists and is non-empty, keep it
+    try:
+        if p.exists() and p.stat().st_size > 0:
+            return p
+    except Exception:
+        pass
+
+    # Legacy mapping for old paths like /app/out/features_matrix.parquet
+    if str(p).startswith("/app/out/"):
+        name = p.name  # e.g., features_matrix.parquet
+        candidates = [
+            Path("/tmp/artifacts/features") / name,
+            Path("/tmp/artifacts/model") / name,
+            Path("/tmp/artifacts") / name,
+        ]
+        for c in candidates:
+            try:
+                if c.exists() and c.stat().st_size > 0:
+                    return c
+            except Exception:
+                continue
+
+    return p
+
+
+def _list_artifacts(max_items: int = 80) -> list[str]:
+    """Best-effort listing of /tmp/artifacts contents for debugging startup crashes."""
+    root = Path("/tmp/artifacts")
+    if not root.exists():
+        return []
+    out: list[str] = []
+    try:
+        for p in root.rglob("*"):
+            out.append(str(p))
+            if len(out) >= max_items:
+                break
+    except Exception:
+        return out
+    return out
+
+
 # -----------------------------
 # Lifespan (BOOTSTRAP FIRST)
 # -----------------------------
@@ -65,20 +114,19 @@ async def lifespan(app: FastAPI):
     except ArtifactError as e:
         raise RuntimeError(f"Stage 5 bootstrap failed: {e}") from e
 
-    # Stage 5 returns local paths in /tmp/artifacts/...
-    model_path = _as_path(app.state.bootstrap.get("model_path"))
-    features_table_path = _as_path(app.state.bootstrap.get("features_path"))
+    # Stage 5 returns local paths (should be /tmp/artifacts/...)
+    model_path = _fix_legacy_path(_as_path(app.state.bootstrap.get("model_path")))
+    features_table_path = _fix_legacy_path(_as_path(app.state.bootstrap.get("features_path")))
 
     # You ALSO need feature_list.json as an artifact.
-    # We support either:
-    # 1) LOCAL_FEATURE_LIST_PATH set by bootstrap
-    # 2) CONFIG includes it
-    # 3) fallback env FEATURE_LIST_PATH
-    feature_list_path = _as_path(app.state.bootstrap.get("feature_list_path")) or _as_path(
-        os.getenv("FEATURE_LIST_PATH")
+    # Supported:
+    # 1) feature_list_path set by bootstrap
+    # 2) fallback env FEATURE_LIST_PATH
+    feature_list_path = _fix_legacy_path(
+        _as_path(app.state.bootstrap.get("feature_list_path")) or _as_path(os.getenv("FEATURE_LIST_PATH"))
     )
 
-    # Validate
+    # Validate "present" (not existence yet)
     if not model_path:
         raise RuntimeError("bootstrap did not provide model_path")
     if not features_table_path:
@@ -88,9 +136,16 @@ async def lifespan(app: FastAPI):
             "feature_list_path not provided. Add it to Stage 5 manifest or set FEATURE_LIST_PATH."
         )
 
-    _require_file(model_path, "MODEL")
-    _require_file(feature_list_path, "FEATURE LIST")
-    _require_file(features_table_path, "FEATURES TABLE")
+    # Validate existence with rich debug output
+    try:
+        _require_file(model_path, "MODEL")
+        _require_file(feature_list_path, "FEATURE LIST")
+        _require_file(features_table_path, "FEATURES TABLE")
+    except Exception as e:
+        found = _list_artifacts()
+        raise RuntimeError(
+            f"{e}. bootstrap={app.state.bootstrap}. /tmp/artifacts_found={found}"
+        ) from e
 
     # Load
     model = joblib.load(model_path)

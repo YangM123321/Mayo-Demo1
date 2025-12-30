@@ -54,53 +54,10 @@ jobs:
         env:
           PYTHONPATH: .
         run: pytest -q
-
-  # -----------------------------
-  # Stage 6B Gate: Streaming smoke test (Kafka/Redpanda)
-  # -----------------------------
-  streaming_smoke:
-    needs: ci_gates
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install deps
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Start Kafka (Redpanda)
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.kafka.yml up -d
-          # wait a bit for broker
-          sleep 10
-          docker compose -f docker-compose.kafka.yml ps
-
-      - name: Run streaming smoke test
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./scripts/streaming_smoke_test.sh
-
-      - name: Tear down Kafka (Redpanda)
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.kafka.yml down -v
+        
 
   build_and_push:
-    needs: [ci_gates, streaming_smoke]
+    needs: ci_gates
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

@@ -11,6 +11,7 @@ from typing import Optional, Tuple
 import yaml
 from google.cloud import storage
 
+
 # Cloud Run writable area. (Also works locally.)
 ARTIFACT_ROOT = pathlib.Path(os.getenv("ARTIFACT_DIR", "/tmp/artifacts")).resolve()
 
@@ -134,7 +135,9 @@ def load_config(path: pathlib.Path) -> dict:
 def bootstrap_stage5() -> dict:
     """
     Stage 5 bootstrap:
-      - downloads FEATURES_URI, MODEL_URI, CONFIG_URI (optional)
+      - downloads FEATURES_URI, MODEL_URI
+      - downloads CONFIG_URI (optional)
+      - downloads FEATURE_LIST_URI (optional but strongly recommended)
       - returns resolved local paths in a dict + loaded config
     """
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -143,6 +146,10 @@ def bootstrap_stage5() -> dict:
     model_uri = os.getenv("MODEL_URI")
     config_uri = os.getenv("CONFIG_URI")
 
+    # NEW: feature list can be provided as either a local path OR a GCS URI.
+    feature_list_path_env = os.getenv("FEATURE_LIST_PATH")   # local path (legacy)
+    feature_list_uri = os.getenv("FEATURE_LIST_URI")         # gs://.../feature_list.json (new)
+
     if not features_uri:
         raise ArtifactError("FEATURES_URI is required")
     if not model_uri:
@@ -150,8 +157,9 @@ def bootstrap_stage5() -> dict:
 
     # Optional integrity envs:
     features_sha = os.getenv("FEATURES_SHA256")  # optional
-    model_sha = os.getenv("MODEL_SHA256")  # optional
-    config_sha = os.getenv("CONFIG_SHA256")  # optional
+    model_sha = os.getenv("MODEL_SHA256")        # optional
+    config_sha = os.getenv("CONFIG_SHA256")      # optional
+    feature_list_sha = os.getenv("FEATURE_LIST_SHA256")  # optional
 
     features_path = download_from_gcs(
         DownloadSpec(
@@ -161,6 +169,7 @@ def bootstrap_stage5() -> dict:
             expected_sha256=features_sha,
         )
     )
+
     model_path = download_from_gcs(
         DownloadSpec(
             uri=model_uri,
@@ -173,7 +182,6 @@ def bootstrap_stage5() -> dict:
     config_obj: dict = {}
     config_path: Optional[pathlib.Path] = None
     if config_uri:
-        # Keep extension based on blob name
         _, blob_name = _parse_gcs_uri(config_uri)
         ext = pathlib.Path(blob_name).suffix or ".yaml"
         config_path = download_from_gcs(
@@ -186,10 +194,36 @@ def bootstrap_stage5() -> dict:
         )
         config_obj = load_config(config_path)
 
+    # ===== NEW: FEATURE_LIST_URI -> download -> set FEATURE_LIST_PATH internally =====
+    # Priority:
+    #  1) FEATURE_LIST_PATH (explicit local path) if provided
+    #  2) FEATURE_LIST_URI (downloaded from GCS)
+    resolved_feature_list_path: Optional[pathlib.Path] = None
+
+    if feature_list_path_env:
+        resolved_feature_list_path = pathlib.Path(feature_list_path_env)
+    elif feature_list_uri:
+        _, blob_name = _parse_gcs_uri(feature_list_uri)
+        ext = pathlib.Path(blob_name).suffix or ".json"
+        resolved_feature_list_path = download_from_gcs(
+            DownloadSpec(
+                uri=feature_list_uri,
+                dest_rel=f"config/feature_list{ext}",
+                min_bytes=int(os.getenv("FEATURE_LIST_MIN_BYTES", "10")),
+                expected_sha256=feature_list_sha,
+            )
+        )
+
+    # IMPORTANT: expose it back to the app consistently
+    # If your service.py expects FEATURE_LIST_PATH env var, set it here too.
+    if resolved_feature_list_path is not None:
+        os.environ["FEATURE_LIST_PATH"] = str(resolved_feature_list_path)
+
     return {
         "artifact_root": str(ARTIFACT_ROOT),
         "features_path": str(features_path),
         "model_path": str(model_path),
         "config_path": str(config_path) if config_path else None,
         "config": config_obj,
+        "feature_list_path": str(resolved_feature_list_path) if resolved_feature_list_path else None,
     }
