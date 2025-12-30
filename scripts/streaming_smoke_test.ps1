@@ -118,7 +118,10 @@ if ($parts.Count -ne 2) { Fail-Smoke "invalid KAFKA_BOOTSTRAP_SERVERS=$brokersOn
 $host = $parts[0]
 $port = [int]$parts[1]
 
-Write-Host "Checking TCP connect to $host:$port ..."
+
+Write-Host "Checking TCP connect to ${host}:${port} ..."
+
+
 if (-not (Wait-ForPort -host $host -port $port -timeoutSeconds 20)) {
   Fail-Smoke "cannot reach broker at $brokersOnHost (is port 9092 published in docker-compose?)"
 }
