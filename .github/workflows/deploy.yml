@@ -58,10 +58,16 @@ jobs:
   # -----------------------------
   # Stage 6B Gate: Streaming smoke test (Kafka/Redpanda)
   # -----------------------------
+  # -----------------------------
+  # Stage 6B Gate: Streaming smoke test (Kafka/Redpanda)
+  # -----------------------------
   streaming_smoke:
     needs: ci_gates
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@v4
 
@@ -71,44 +77,29 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        shell: bash
         run: |
-          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # REQUIRED if you import "from kafka import ..."
           pip install kafka-python
 
       - name: Start Kafka (Redpanda)
-        shell: bash
         run: |
-          set -euo pipefail
           docker compose -f docker-compose.kafka.yml up -d
           docker compose -f docker-compose.kafka.yml ps
 
-      - name: Wait for broker (localhost:9092)
-        shell: bash
-        run: |
-          set -euo pipefail
-          for i in {1..60}; do
-            (echo > /dev/tcp/127.0.0.1/9092) >/dev/null 2>&1 && exit 0
-            sleep 1
-          done
-          echo "Kafka port not ready" && docker compose -f docker-compose.kafka.yml logs && exit 1
-
-      - name: Run streaming smoke test
-        shell: bash
+      # Run the PowerShell smoke test (it waits for readiness, creates topics, runs producer+consumer,
+      # and dumps logs/topics/DLQ on failure)
+      - name: Run streaming smoke test (PowerShell)
         env:
           KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+          KAFKA_TOPIC_IN: vitals.in
+          KAFKA_TOPIC_DLQ: vitals.dlq
         run: |
-          set -euo pipefail
-          bash scripts/streaming_smoke_test.sh
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/streaming_smoke_test.ps1
 
       - name: Tear down Kafka (Redpanda)
         if: always()
-        shell: bash
         run: |
-          set -euo pipefail
           docker compose -f docker-compose.kafka.yml down -v
 
 
