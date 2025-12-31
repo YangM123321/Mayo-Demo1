@@ -1,7 +1,7 @@
 services:
   redpanda:
-    image: redpanda/redpanda:latest
-    container_name: mayo-demo1-redpanda-1
+    image: redpandadata/redpanda:latest
+    container_name: redpanda
     command:
       - redpanda
       - start
@@ -15,16 +15,10 @@ services:
       - --node-id
       - "0"
       - --check=false
-      # INTERNAL for containers
       - --kafka-addr
       - PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
-      # IMPORTANT: what clients will receive in metadata
       - --advertise-kafka-addr
-      - PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
-      # optional but useful
-      - --advertise-rpc-addr
-      - redpanda:33145
+      - PLAINTEXT://redpanda:29092,OUTSIDE://127.0.0.1:9092
     ports:
       - "9092:9092"
       - "9644:9644"
-
