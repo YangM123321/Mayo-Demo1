@@ -112,20 +112,20 @@ Safe-Run { docker compose -f $compose exec -T redpanda rpk topic create $env:KAF
 Safe-Run { docker compose -f $compose exec -T redpanda rpk topic list }
 
 # ====== Host connectivity probe (Linux-safe) ======
+# ====== Host connectivity probe (Linux-safe) ======
 Write-Section "host connectivity probe"
 $parts = $brokersOnHost.Split(":")
 if ($parts.Count -ne 2) { Fail-Smoke "invalid KAFKA_BOOTSTRAP_SERVERS=$brokersOnHost" }
-$host = $parts[0]
-$port = [int]$parts[1]
 
+$brokerHost = $parts[0]
+$brokerPort = [int]$parts[1]
 
-Write-Host "Checking TCP connect to ${host}:${port} ..."
-
-
-if (-not (Wait-ForPort -host $host -port $port -timeoutSeconds 20)) {
+Write-Host "Checking TCP connect to ${brokerHost}:${brokerPort} ..."
+if (-not (Wait-ForPort -host $brokerHost -port $brokerPort -timeoutSeconds 20)) {
   Fail-Smoke "cannot reach broker at $brokersOnHost (is port 9092 published in docker-compose?)"
 }
 Write-Host "✅ TCP reachable"
+
 
 # ====== Run producer ======
 Write-Section "run producer"
