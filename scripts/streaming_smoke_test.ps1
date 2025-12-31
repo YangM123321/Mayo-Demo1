@@ -31,12 +31,12 @@ function Safe-Run([scriptblock]$cmd) {
   try { & $cmd } catch { Write-Host "(ignored) $($_.Exception.Message)" -ForegroundColor DarkYellow }
 }
 
-function Wait-ForPort([string]$host, [int]$port, [int]$timeoutSeconds) {
+function Wait-ForPort([string]$targetHost, [int]$targetPort, [int]$timeoutSeconds) {
   $deadline = (Get-Date).AddSeconds($timeoutSeconds)
   while ((Get-Date) -lt $deadline) {
     try {
       $client = [System.Net.Sockets.TcpClient]::new()
-      $iar = $client.BeginConnect($host, $port, $null, $null)
+      $iar = $client.BeginConnect($targetHost, $targetPort, $null, $null)
       if ($iar.AsyncWaitHandle.WaitOne(500)) {
         $client.EndConnect($iar) | Out-Null
         $client.Close()
@@ -50,6 +50,9 @@ function Wait-ForPort([string]$host, [int]$port, [int]$timeoutSeconds) {
   }
   return $false
 }
+
+
+
 
 function Fail-Smoke {
   param([string]$Message = "streaming smoke test failed")
@@ -121,7 +124,7 @@ $brokerHost = $parts[0]
 $brokerPort = [int]$parts[1]
 
 Write-Host "Checking TCP connect to ${brokerHost}:${brokerPort} ..."
-if (-not (Wait-ForPort -host $brokerHost -port $brokerPort -timeoutSeconds 20)) {
+if (-not (Wait-ForPort -targetHost $brokerHost -targetPort $brokerPort -timeoutSeconds 20)) {
   Fail-Smoke "cannot reach broker at $brokersOnHost (is port 9092 published in docker-compose?)"
 }
 Write-Host "✅ TCP reachable"
