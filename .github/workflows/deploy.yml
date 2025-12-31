@@ -14,6 +14,8 @@ env:
   REGION: ${{ secrets.GCP_REGION }}
   GAR_REPO: ${{ secrets.GAR_REPO }}
   IMAGE_NAME: mayo-api
+  
+
 
   # Preferred: single manifest drives Stage 5 downloads inside the container
   ARTIFACT_MANIFEST_URI: gs://innate-mix-432320-h1-mayo-artifacts/mayo/artifacts/2025-12-28_01/manifest.yaml
@@ -91,9 +93,11 @@ jobs:
       # and dumps logs/topics/DLQ on failure)
       - name: Run streaming smoke test (PowerShell)
         env:
-          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+          KAFKA_BOOTSTRAP_SERVERS: 127.0.0.1:9092
           KAFKA_TOPIC_IN: vitals.in
           KAFKA_TOPIC_DLQ: vitals.dlq
+
+
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/streaming_smoke_test.ps1
 

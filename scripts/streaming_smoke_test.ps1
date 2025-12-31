@@ -2,7 +2,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ====== Config ======
-if (-not $env:KAFKA_BOOTSTRAP_SERVERS) { $env:KAFKA_BOOTSTRAP_SERVERS = "localhost:9092" }
+
+if (-not $env:KAFKA_BOOTSTRAP_SERVERS) { $env:KAFKA_BOOTSTRAP_SERVERS = "127.0.0.1:9092" }
+
 if (-not $env:KAFKA_TOPIC_IN)          { $env:KAFKA_TOPIC_IN          = "vitals.in" }
 if (-not $env:KAFKA_TOPIC_DLQ)         { $env:KAFKA_TOPIC_DLQ         = "vitals.dlq" }
 
