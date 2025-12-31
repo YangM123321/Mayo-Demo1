@@ -21,7 +21,8 @@ $compose = "docker-compose.kafka.yml"
 # IMPORTANT:
 # - From the GitHub runner host: localhost:9092 is correct IF compose publishes 9092.
 # - From INSIDE the redpanda container: use redpanda:9092
-$brokersInContainer = "redpanda:9092"
+$brokersInContainer = "redpanda:29092"
+
 $brokersOnHost      = $env:KAFKA_BOOTSTRAP_SERVERS
 
 function Write-Section([string]$title) {
