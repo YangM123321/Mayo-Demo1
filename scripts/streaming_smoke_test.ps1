@@ -143,10 +143,17 @@ try {
 
 # ====== Run consumer (background) ======
 Write-Section "run consumer (background)"
+
+# logs must be different files in PowerShell
+$consumerOut = "/tmp/consumer.out.log"
+$consumerErr = "/tmp/consumer.err.log"
+Remove-Item $consumerOut, $consumerErr -ErrorAction SilentlyContinue | Out-Null
+
 $consumerProc = Start-Process -FilePath "python" `
-  -ArgumentList @("-m","src.streaming.consumer","--max-messages","20") `
+  -ArgumentList @("-m","src.streaming.consumer") `
   -NoNewWindow -PassThru `
-  -RedirectStandardOutput $consumerLog -RedirectStandardError $consumerLog
+  -RedirectStandardOutput $consumerOut `
+  -RedirectStandardError  $consumerErr
 
 # ====== Wait for audit file to have content ======
 Write-Section "wait for audit output"
