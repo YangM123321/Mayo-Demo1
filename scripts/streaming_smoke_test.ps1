@@ -4,7 +4,6 @@ $ErrorActionPreference = "Stop"
 # ====== Config ======
 
 if (-not $env:KAFKA_BOOTSTRAP_SERVERS) { $env:KAFKA_BOOTSTRAP_SERVERS = "127.0.0.1:9092" }
-
 if (-not $env:KAFKA_TOPIC_IN)          { $env:KAFKA_TOPIC_IN          = "vitals.in" }
 if (-not $env:KAFKA_TOPIC_DLQ)         { $env:KAFKA_TOPIC_DLQ         = "vitals.dlq" }
 
@@ -14,16 +13,18 @@ $env:KAFKA_GROUP_ID = "ci-consumer-$runId-$runAttempt"
 
 $env:IDEMPOTENCY_DB    = "/tmp/seen_events_ci.db"
 $env:VITALS_AUDIT_PATH = "/tmp/vitals_audit.log"
-$consumerLog           = "/tmp/consumer.log"
 
 $compose = "docker-compose.kafka.yml"
 
 # IMPORTANT:
-# - From the GitHub runner host: localhost:9092 is correct IF compose publishes 9092.
-# - From INSIDE the redpanda container: use redpanda:9092
+# - From the GitHub runner host: localhost/127.0.0.1:9092 is correct IF compose publishes 9092.
+# - From INSIDE the redpanda container: use redpanda:29092
 $brokersInContainer = "redpanda:29092"
-
 $brokersOnHost      = $env:KAFKA_BOOTSTRAP_SERVERS
+
+# consumer logs (must be different files in PowerShell)
+$consumerOut = "/tmp/consumer.out.log"
+$consumerErr = "/tmp/consumer.err.log"
 
 function Write-Section([string]$title) {
   Write-Host ""
@@ -54,16 +55,16 @@ function Wait-ForPort([string]$targetHost, [int]$targetPort, [int]$timeoutSecond
   return $false
 }
 
-
-
-
 function Fail-Smoke {
   param([string]$Message = "streaming smoke test failed")
 
   Write-Host "❌ $Message" -ForegroundColor Red
 
-  Write-Section "consumer log (tail)"
-  Safe-Run { Get-Content $consumerLog -Tail 200 }
+  Write-Section "consumer stdout (tail)"
+  Safe-Run { Get-Content $consumerOut -Tail 200 }
+
+  Write-Section "consumer stderr (tail)"
+  Safe-Run { Get-Content $consumerErr -Tail 200 }
 
   Write-Section "redpanda logs"
   Safe-Run { docker compose -f $compose logs --no-color redpanda }
@@ -91,7 +92,8 @@ function Fail-Smoke {
 # ====== Clean files ======
 Safe-Run { Remove-Item -Force $env:VITALS_AUDIT_PATH -ErrorAction SilentlyContinue }
 Safe-Run { Remove-Item -Force $env:IDEMPOTENCY_DB    -ErrorAction SilentlyContinue }
-Safe-Run { Remove-Item -Force $consumerLog           -ErrorAction SilentlyContinue }
+Safe-Run { Remove-Item -Force $consumerOut           -ErrorAction SilentlyContinue }
+Safe-Run { Remove-Item -Force $consumerErr           -ErrorAction SilentlyContinue }
 
 # ====== Start Redpanda ======
 Write-Section "docker compose up"
@@ -117,8 +119,7 @@ Safe-Run { docker compose -f $compose exec -T redpanda rpk topic create $env:KAF
 Safe-Run { docker compose -f $compose exec -T redpanda rpk topic create $env:KAFKA_TOPIC_DLQ --partitions 1 --replicas 1 }
 Safe-Run { docker compose -f $compose exec -T redpanda rpk topic list }
 
-# ====== Host connectivity probe (Linux-safe) ======
-# ====== Host connectivity probe (Linux-safe) ======
+# ====== Host connectivity probe ======
 Write-Section "host connectivity probe"
 $parts = $brokersOnHost.Split(":")
 if ($parts.Count -ne 2) { Fail-Smoke "invalid KAFKA_BOOTSTRAP_SERVERS=$brokersOnHost" }
@@ -132,21 +133,8 @@ if (-not (Wait-ForPort -targetHost $brokerHost -targetPort $brokerPort -timeoutS
 }
 Write-Host "✅ TCP reachable"
 
-
-# ====== Run producer ======
-Write-Section "run producer"
-try {
-  python -m src.streaming.producer --n 20
-} catch {
-  Fail-Smoke "producer failed: $($_.Exception.Message)"
-}
-
-# ====== Run consumer (background) ======
+# ====== Run consumer (background) FIRST ======
 Write-Section "run consumer (background)"
-
-# logs must be different files in PowerShell
-$consumerOut = "/tmp/consumer.out.log"
-$consumerErr = "/tmp/consumer.err.log"
 Remove-Item $consumerOut, $consumerErr -ErrorAction SilentlyContinue | Out-Null
 
 $consumerProc = Start-Process -FilePath "python" `
@@ -155,11 +143,33 @@ $consumerProc = Start-Process -FilePath "python" `
   -RedirectStandardOutput $consumerOut `
   -RedirectStandardError  $consumerErr
 
+# Give it a moment to start & subscribe
+Start-Sleep -Seconds 2
+
+# If it died instantly, fail with logs
+if ($consumerProc.HasExited) {
+  Fail-Smoke "consumer exited early (ExitCode=$($consumerProc.ExitCode))"
+}
+
+# ====== Run producer SECOND ======
+Write-Section "run producer"
+try {
+  python -m src.streaming.producer --n 20
+} catch {
+  Fail-Smoke "producer failed: $($_.Exception.Message)"
+}
+
 # ====== Wait for audit file to have content ======
 Write-Section "wait for audit output"
 $deadline = (Get-Date).AddSeconds(45)
 do {
   Start-Sleep -Milliseconds 500
+
+  # If consumer crashes during wait, fail immediately with logs
+  if ($consumerProc.HasExited) {
+    Fail-Smoke "consumer exited during processing (ExitCode=$($consumerProc.ExitCode))"
+  }
+
   if (Test-Path $env:VITALS_AUDIT_PATH) {
     if ((Get-Item $env:VITALS_AUDIT_PATH).Length -gt 0) { break }
   }
