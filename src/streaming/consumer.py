@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 import os
 import signal
-import sys
-import time
 from datetime import datetime
 from typing import Any, Optional
 
@@ -29,7 +27,7 @@ def _ensure_parent_dir(path: str) -> None:
 def _write_audit_line(audit_path: str, record: dict[str, Any]) -> None:
     _ensure_parent_dir(audit_path)
     line = json.dumps(record, ensure_ascii=False) + "\n"
-    # Use line-buffered writes so CI sees output quickly
+    # Flush each line so CI sees bytes immediately
     with open(audit_path, "a", encoding="utf-8") as f:
         f.write(line)
         f.flush()
@@ -45,19 +43,14 @@ def main() -> int:
     group_id = _env("KAFKA_GROUP_ID", "ci-consumer-local-0")
     audit_path = _env("VITALS_AUDIT_PATH", "/tmp/vitals_audit.log")
 
-    # Optional knobs
     auto_offset_reset = _env("KAFKA_AUTO_OFFSET_RESET", "earliest")  # earliest|latest
     poll_timeout_s = float(_env("KAFKA_POLL_TIMEOUT_S", "0.5"))
 
-    # IMPORTANT:
-    # - For CI smoke test, we want the consumer to NOT exit early.
-    # - We keep polling until killed by the pwsh script.
     cfg: dict[str, Any] = {
         "bootstrap.servers": bootstrap,
         "group.id": group_id,
         "enable.auto.commit": True,
         "auto.offset.reset": auto_offset_reset,
-        # be resilient in small CI boxes
         "session.timeout.ms": 10000,
         "max.poll.interval.ms": 300000,
     }
@@ -67,13 +60,13 @@ def main() -> int:
 
     stop = _StopFlag()
 
-    def _handle_sigterm(signum: int, frame: Optional[object]) -> None:
+    def _handle_stop(signum: int, frame: Optional[object]) -> None:
         stop.stop = True
 
-    signal.signal(signal.SIGTERM, _handle_sigterm)
-    signal.signal(signal.SIGINT, _handle_sigterm)
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
 
-    # Touch the audit file path exists (but still empty until we consume)
+    # Ensure directory exists; file will be created on first write
     _ensure_parent_dir(audit_path)
 
     try:
@@ -81,24 +74,17 @@ def main() -> int:
             msg = c.poll(poll_timeout_s)
 
             if msg is None:
-                # no message yet; keep waiting
                 continue
 
             if msg.error():
-                # Non-fatal errors can happen during rebalance; log & continue
                 _write_audit_line(
                     audit_path,
-                    {
-                        "ts": _now_iso(),
-                        "type": "kafka_error",
-                        "error": str(msg.error()),
-                    },
+                    {"ts": _now_iso(), "type": "kafka_error", "error": str(msg.error())},
                 )
                 continue
 
             try:
                 raw = msg.value()
-                # raw may be bytes
                 if raw is None:
                     payload: Any = None
                 else:
@@ -106,7 +92,7 @@ def main() -> int:
                     try:
                         payload = json.loads(s)
                     except Exception:
-                        payload = s  # keep as string if not JSON
+                        payload = s
 
                 record = {
                     "ts": _now_iso(),
@@ -119,22 +105,16 @@ def main() -> int:
                 _write_audit_line(audit_path, record)
 
             except Exception as e:
-                # Never crash the consumer in CI; write error and keep polling
                 _write_audit_line(
                     audit_path,
-                    {
-                        "ts": _now_iso(),
-                        "type": "consumer_exception",
-                        "error": repr(e),
-                    },
+                    {"ts": _now_iso(), "type": "consumer_exception", "error": repr(e)},
                 )
 
         return 0
 
     except KafkaException as e:
         _write_audit_line(
-            audit_path,
-            {"ts": _now_iso(), "type": "kafka_exception", "error": repr(e)},
+            audit_path, {"ts": _now_iso(), "type": "kafka_exception", "error": repr(e)}
         )
         return 2
 
