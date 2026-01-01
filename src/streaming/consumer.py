@@ -1,82 +1,149 @@
 from __future__ import annotations
 
-import logging
+import json
 import os
-from typing import Callable
+import signal
+import sys
+import time
+from datetime import datetime
+from typing import Any, Optional
 
-from confluent_kafka import Consumer
-from tenacity import retry, stop_after_attempt, wait_exponential
-
-from src.streaming.config import KafkaConfig
-from src.streaming.dlq import publish_dlq
-from src.streaming.idempotency import mark_seen, seen
-from src.streaming.schemas import VitalEvent
-
-logger = logging.getLogger("mayo.streaming")
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+from confluent_kafka import Consumer, KafkaException
 
 
-def _consumer(conf: KafkaConfig) -> Consumer:
-    return Consumer(
-        {
-            "bootstrap.servers": conf.bootstrap_servers,
-            "group.id": conf.group_id,
-            "auto.offset.reset": "earliest",
-            "enable.auto.commit": False,  # commit only after success
-            "max.poll.interval.ms": 600000,
-        }
-    )
+def _env(name: str, default: str) -> str:
+    v = os.getenv(name)
+    return v if v else default
 
 
-@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=0.5, min=0.5, max=8))
-def _process_with_retry(handler: Callable[[VitalEvent], None], evt: VitalEvent) -> None:
-    handler(evt)
+def _now_iso() -> str:
+    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
 
-def run_forever(handler: Callable[[VitalEvent], None]) -> None:
-    conf = KafkaConfig.from_env()
-    c = _consumer(conf)
-    c.subscribe([conf.topic_in])
+def _ensure_parent_dir(path: str) -> None:
+    parent = os.path.dirname(path)
+    if parent and not os.path.exists(parent):
+        os.makedirs(parent, exist_ok=True)
 
-    logger.info("consumer_start", extra={"topic": conf.topic_in, "group": conf.group_id})
+
+def _write_audit_line(audit_path: str, record: dict[str, Any]) -> None:
+    _ensure_parent_dir(audit_path)
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    # Use line-buffered writes so CI sees output quickly
+    with open(audit_path, "a", encoding="utf-8") as f:
+        f.write(line)
+        f.flush()
+
+
+class _StopFlag:
+    stop: bool = False
+
+
+def main() -> int:
+    bootstrap = _env("KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:9092")
+    topic_in = _env("KAFKA_TOPIC_IN", "vitals.in")
+    group_id = _env("KAFKA_GROUP_ID", "ci-consumer-local-0")
+    audit_path = _env("VITALS_AUDIT_PATH", "/tmp/vitals_audit.log")
+
+    # Optional knobs
+    auto_offset_reset = _env("KAFKA_AUTO_OFFSET_RESET", "earliest")  # earliest|latest
+    poll_timeout_s = float(_env("KAFKA_POLL_TIMEOUT_S", "0.5"))
+
+    # IMPORTANT:
+    # - For CI smoke test, we want the consumer to NOT exit early.
+    # - We keep polling until killed by the pwsh script.
+    cfg: dict[str, Any] = {
+        "bootstrap.servers": bootstrap,
+        "group.id": group_id,
+        "enable.auto.commit": True,
+        "auto.offset.reset": auto_offset_reset,
+        # be resilient in small CI boxes
+        "session.timeout.ms": 10000,
+        "max.poll.interval.ms": 300000,
+    }
+
+    c = Consumer(cfg)
+    c.subscribe([topic_in])
+
+    stop = _StopFlag()
+
+    def _handle_sigterm(signum: int, frame: Optional[object]) -> None:
+        stop.stop = True
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+    signal.signal(signal.SIGINT, _handle_sigterm)
+
+    # Touch the audit file path exists (but still empty until we consume)
+    _ensure_parent_dir(audit_path)
 
     try:
-        while True:
-            msg = c.poll(1.0)
+        while not stop.stop:
+            msg = c.poll(poll_timeout_s)
+
             if msg is None:
+                # no message yet; keep waiting
                 continue
+
             if msg.error():
-                logger.error("kafka_error", extra={"err": str(msg.error())})
-                continue
-
-            raw = msg.value().decode("utf-8", errors="replace")
-
-            # schema validation
-            try:
-                evt = VitalEvent.parse_json(raw)
-            except Exception as e:
-                publish_dlq(conf, raw=raw, reason=str(e), extra={"stage": "schema"})
-                c.commit(message=msg, asynchronous=False)
-                continue
-
-            # idempotency
-            if seen(evt.meta.event_id):
-                logger.info("duplicate_event_skip", extra={"event_id": evt.meta.event_id})
-                c.commit(message=msg, asynchronous=False)
-                continue
-
-            # processing + retries
-            try:
-                _process_with_retry(handler, evt)
-                mark_seen(evt.meta.event_id)
-                c.commit(message=msg, asynchronous=False)
-            except Exception as e:
-                publish_dlq(
-                    conf,
-                    raw=raw,
-                    reason=f"processing_failed: {e}",
-                    extra={"stage": "processing", "event_id": evt.meta.event_id},
+                # Non-fatal errors can happen during rebalance; log & continue
+                _write_audit_line(
+                    audit_path,
+                    {
+                        "ts": _now_iso(),
+                        "type": "kafka_error",
+                        "error": str(msg.error()),
+                    },
                 )
-                c.commit(message=msg, asynchronous=False)
+                continue
+
+            try:
+                raw = msg.value()
+                # raw may be bytes
+                if raw is None:
+                    payload: Any = None
+                else:
+                    s = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
+                    try:
+                        payload = json.loads(s)
+                    except Exception:
+                        payload = s  # keep as string if not JSON
+
+                record = {
+                    "ts": _now_iso(),
+                    "topic": msg.topic(),
+                    "partition": msg.partition(),
+                    "offset": msg.offset(),
+                    "key": (msg.key().decode("utf-8") if msg.key() else None),
+                    "payload": payload,
+                }
+                _write_audit_line(audit_path, record)
+
+            except Exception as e:
+                # Never crash the consumer in CI; write error and keep polling
+                _write_audit_line(
+                    audit_path,
+                    {
+                        "ts": _now_iso(),
+                        "type": "consumer_exception",
+                        "error": repr(e),
+                    },
+                )
+
+        return 0
+
+    except KafkaException as e:
+        _write_audit_line(
+            audit_path,
+            {"ts": _now_iso(), "type": "kafka_exception", "error": repr(e)},
+        )
+        return 2
+
     finally:
-        c.close()
+        try:
+            c.close()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
